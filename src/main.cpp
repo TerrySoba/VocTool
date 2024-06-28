@@ -114,6 +114,7 @@ int main(int argc, char* argv[])
     {
         clp::CommandLineParser parser(
             "Program to convert WAVE files into VOC files including optional ADPCM compression.\n"
+            "Conversion from VOC to WAVE is also supported.\n"
             "File is converted to mono. If a frequency is give then the file is also resampled\n"
             "to the given frequency. Otherwise the sample frequency of the WAVE file is kept.\n\n"
             "Compression formats:\n"

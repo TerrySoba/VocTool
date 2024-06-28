@@ -1,16 +1,19 @@
-# VocTool
+= VocTool
 
 This project provides a tool to convert WAVE file into 8bit Creative VOC files, including ADPCM compression.
 Currently 2bit and 4bit ADPCM are supported.
 
 The resulting VOC file is always in mono.
 
-## Usage of encoder
+== Usage of encoder
 
-~~~
+[source]
+.Usage of voctool
+----
 Usage: voctool -i INPUT [ -f FREQUENCY ] -o OUTPUT [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] 
 
 Program to convert WAVE files into VOC files including optional ADPCM compression.
+Conversion from VOC to WAVE is also supported.
 File is converted to mono. If a frequency is give then the file is also resampled
 to the given frequency. Otherwise the sample frequency of the WAVE file is kept.
 
@@ -27,23 +30,37 @@ options:
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9 ( default: -1.0 )
   -l, --level        Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow. ( default: 4 )
-~~~
+----
 
-Example usage:
-~~~
+== Examples
+[source,shell]
+.Encoding a WAVE file into VOC format. A conversion to 8000Hz and ADPCM4 compression is done. The volume is normalized to 70%.
+----
 voctool -i sound.wav -f 8000 -c ADPCM4 -o sound.voc -n 0.7
-~~~
-This will encode the file **sound.wav** into a Creative ADPCM encoded VOC file with 8kHz.
-It will also normalize the sound to 70% of the maximum volume.
+----
 
+[source,shell]
+.Decoding a VOC file into WAVE format. Currently decoding VOC files does not support changing of the frequency or compression. The WAVE will always be 8bit PCM.
+----
+voctool -i sound.voc -o sound.wav
+----
 
-## About Creative ADPCM
+== Choosing the right ADPCM compression level
+
+The tool supports the option to set the compression level. The compression level is a number between 1 and 8.
+The level defines the number of samples that are combined during compression. If a number of 4 is chosen that means that the algorithm will exhastively try every combination of 4 samples to find the best compression. For ADPCM4 this means that incremeting the level by 1 will increase the runtime by a factor of 16. For ADPCM2 the factor is 4.
+
+For *ADPCM4* the *level 4* seems to be a good compromise between quality and speed. 
+
+For *ADPCM2* the *level 7* seems to be a good compromise.
+
+== About Creative ADPCM
 
 Creative ADPCM compresses an 8bit per sample sound file into a 4bit/2bit per sample sound file.
 This halves/quaters the required space, but also decreases the sound quality.
 This works by only storing the difference to the previous sample.
 
-## About this encoder
+== About this encoder
 
 I wrote this encoder because I needed a Creative ADPCM encoder for my MSDOS platform game.
 At first I looked for already existing encoders, but there actually were no free encoders available.
