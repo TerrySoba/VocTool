@@ -223,10 +223,19 @@ std::vector<double> lowPassFilter(const std::vector<double>& input, double sampl
 }
 
 
-std::vector<double> resample(const std::vector<double>& inputData, uint32_t inputSampleRate, uint32_t outputSampleRate)
+std::vector<double> resample(
+    const std::vector<double>& inputData,
+    uint32_t inputSampleRate,
+    uint32_t outputSampleRate,
+    std::optional<double> cutoffFrequency,
+    std::optional<double> transitionBandwidth)
 {
     // first lowpass filter signal to prevent aliasing
-    auto input = lowPassFilter(inputData, inputSampleRate, outputSampleRate / 2.0, outputSampleRate / 10.0);
+    auto input = lowPassFilter(
+        inputData,
+        inputSampleRate,
+        cutoffFrequency.value_or(outputSampleRate / 2.0),
+        transitionBandwidth.value_or(outputSampleRate / 10.0));
     uint64_t outputSize = (uint64_t)input.size() * (uint64_t)outputSampleRate / (uint64_t)inputSampleRate;
     // std::cout << "outputSize = " << outputSize << "\n";
     std::vector<double> output(outputSize);

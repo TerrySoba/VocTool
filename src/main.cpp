@@ -31,22 +31,27 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         return 1;
     }
 
-    int32_t targetSampleRate = parser.getValue<int32_t>("frequency");
+    auto targetSampleRate = parser.getValueOptional<int32_t>("frequency");
     auto filename = parser.getValue<std::string>("input");
     auto waveFile = loadWaveFileToMono(filename.c_str());
 
     printf("Creating file %s, ", parser.getValue<std::string>("output").c_str());
 
-    if (targetSampleRate > 0)
+    if (targetSampleRate.has_value() && *targetSampleRate != waveFile.sampleRate)
     {
-        printf("resampling from %d Hz to %d Hz, ", waveFile.sampleRate, targetSampleRate);
+        printf("resampling from %d Hz to %d Hz, ", waveFile.sampleRate, *targetSampleRate);
         // resample
-        waveFile.data = resample(waveFile.data, waveFile.sampleRate, targetSampleRate);
-        waveFile.sampleRate = targetSampleRate;
+        waveFile.data = resample(
+            waveFile.data,
+            waveFile.sampleRate,
+            *targetSampleRate,
+            parser.getValueOptional<double>("cutoff"),
+            parser.getValueOptional<double>("transition"));
+        waveFile.sampleRate = *targetSampleRate;
     }
 
     // if normalize is requested normalize data
-    if (parser.getValue<float>("normalize") > 0.0)
+    if (parser.hasValue("normalize"))
     {
         normalize(waveFile.data, parser.getValue<float>("normalize"));
     }
@@ -122,11 +127,13 @@ int main(int argc, char* argv[])
             "  ADPCM4 - ADPCM 4-bit per sample\n"
             "  ADPCM2 - ADPCM 2-bit per sample\n");
         parser.addParameter("input", "i", "Name of the input file", clp::ParameterRequired::yes);
-        parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no, "-1");
         parser.addParameter("output", "o", "Name of the output file", clp::ParameterRequired::yes);
+        parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no);
         parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
-        parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no, "-1.0");
+        parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
         parser.addParameter("level", "l", "Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow.", clp::ParameterRequired::no, "4");
+        parser.addParameter("cutoff", "C", "Cutoff frequency for lowpass filter in Hz. Default is half of sampling frequency.", clp::ParameterRequired::no);
+        parser.addParameter("transition", "T", "Transition bandwidth for lowpass filter in Hz. Default is 1/10 of sampling frequency.", clp::ParameterRequired::no);
 
         parser.parse(argc, argv);
 

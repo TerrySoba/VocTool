@@ -10,7 +10,7 @@ The resulting VOC file is always in mono.
 [source]
 .Usage of voctool
 ----
-Usage: voctool -i INPUT [ -f FREQUENCY ] -o OUTPUT [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] 
+Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] [ -C CUTOFF ] [ -T TRANSITION ] 
 
 Program to convert WAVE files into VOC files including optional ADPCM compression.
 Conversion from VOC to WAVE is also supported.
@@ -25,11 +25,13 @@ Compression formats:
 
 options:
   -i, --input        Name of the input file
-  -f, --frequency    Frequency of output file in hertz ( default: -1 )
   -o, --output       Name of the output file
+  -f, --frequency    Frequency of output file in hertz
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
-  -n, --normalize    Normalize audio to given fraction, e.g. 0.9 ( default: -1.0 )
+  -n, --normalize    Normalize audio to given fraction, e.g. 0.9
   -l, --level        Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow. ( default: 4 )
+  -C, --cutoff       Cutoff frequency for lowpass filter in Hz. Default is half of sampling frequency.
+  -T, --transition   Transition bandwidth for lowpass filter in Hz. Default is 1/10 of sampling frequency.
 ----
 
 == Examples

@@ -3,8 +3,14 @@
 
 #include <cstdint>
 #include <vector>
+#include <optional>
 
-std::vector<double> resample(const std::vector<double>& inputData, uint32_t inputSampleRate, uint32_t outputSampleRate);
+std::vector<double> resample(
+    const std::vector<double>& inputData,
+    uint32_t inputSampleRate,
+    uint32_t outputSampleRate,
+    std::optional<double> cutoffFrequency = {},
+    std::optional<double> transitionBandwidth = {});
 
 std::vector<double> toDoubleVector(const std::vector<int32_t>& input);
 std::vector<double> toDoubleVector(const std::vector<int16_t>& input);

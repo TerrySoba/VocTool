@@ -29,6 +29,15 @@ std::vector<uint8_t> createVocFile(
     const std::vector<uint8_t>& sampleData,
     VocSampleFormat sampleFormat)
 {
+    
+    // minimum frequency for VOC files
+    // This is limited by the way VOC files encode the time constant
+    const uint32_t MIN_VOC_FREQUENCY = 3908;
+    if (frequency < MIN_VOC_FREQUENCY)
+    {
+        throw std::runtime_error("Frequency too low for VOC file. Minimum frequency is 3908 Hz.");
+    }
+
     uint8_t timeConstant = round(256 - 1000000.0 / frequency);
 
     std::string vocHeader = "Creative Voice File\x1a";

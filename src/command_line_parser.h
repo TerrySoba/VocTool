@@ -56,12 +56,6 @@ public:
         ParameterRequired required,
         std::optional<std::string> defaultValue = {})
     {
-        if (required == ParameterRequired::no && !defaultValue.has_value())
-        {
-            std::stringstream message;
-            message << "Optional parameters need a default value, but parameter \"" << name << "\" is optional and has no default value.";
-            throw std::logic_error(message.str());
-        }
         m_parameters.push_back(Parameter{name, shortForm, description, required, defaultValue, {}});
     }
 
@@ -134,8 +128,7 @@ public:
 
     }
 
-    template <typename T>
-    T getValue(const std::string& name) const
+    bool hasValue(const std::string& name) const
     {
         auto it = std::find_if(m_parameters.begin(), m_parameters.end(), [name](auto value){return value.name == name;});
         if (it == m_parameters.end())
@@ -145,11 +138,45 @@ public:
             throw std::logic_error(message.str());
         }
 
+        return it->value.has_value();
+    }
+
+    template <typename T>
+    std::optional<T> getValueOptional(const std::string& name) const
+    {
+        auto it = std::find_if(m_parameters.begin(), m_parameters.end(), [name](auto value){return value.name == name;});
+        if (it == m_parameters.end())
+        {
+            std::stringstream message;
+            message << "No parameter with name \"" << name << "\" is was found.\n";
+            throw std::logic_error(message.str());
+        }
+
+        if (!it->value.has_value())
+        {
+            return {};
+        }
+
         std::stringstream ss;
         ss << *it->value;
         T ret;
         ss >> ret;
         return ret;
+    }
+
+    template <typename T>
+    T getValue(const std::string& name) const
+    {
+        auto val = getValueOptional<T>(name);
+
+        if (!val.has_value())
+        {
+            std::stringstream message;
+            message << "Parameter \"" << name << "\" is missing.\n";
+            throw std::logic_error(message.str());
+        }
+
+        return *val;
     }
 
 private:
@@ -192,7 +219,7 @@ private:
             std::string line = makeParameterString(param.shortForm, param.name);
             std::cout << "  " << line << makeSpaces(longestLine - line.size()) << "  " << param.description;
 
-            if (param.required == ParameterRequired::no)
+            if (param.required == ParameterRequired::no && param.defaultValue.has_value())
             {
                 std::cout << " ( default: " << param.defaultValue.value_or("") << " )";
             }
