@@ -18,6 +18,19 @@ std::map <std::string, VocSampleFormat> compressionFormats =
     {"ADPCM2", VOC_FORMAT_ADPCM_2BIT},
 };
 
+std::string vocSampleFormatToString(VocSampleFormat format)
+{
+    for (auto& elem : compressionFormats)
+    {
+        if (elem.second == format)
+        {
+            return elem.first;
+        }
+    }
+    return "UNKNOWN";
+}
+
+
 int convertWaveToVoc(const clp::CommandLineParser& parser)
 {
     VocSampleFormat format;
@@ -98,8 +111,9 @@ int convertVocToWave(const clp::CommandLineParser& parser)
     auto vocData = readVocFile(inputFilename);
 
     std::cout << "Read VOC file " << inputFilename << std::endl;
-    std::cout << "  Sample format: " << vocData.sampleFormat << std::endl;
+    std::cout << "  Sample format: " << vocSampleFormatToString(vocData.sampleFormat) << " (" << vocData.sampleFormat << ")" << std::endl;
     std::cout << "  Sample size: " << vocData.sampleData.size() << std::endl;
+    std::cout << "  Frequency: " << timeConstantToFrequency(vocData.timeConstant) << "Hz" << std::endl;
     std::cout << "  Time constant: " << (int)vocData.timeConstant << std::endl;
     std::cout << "  Major version: " << (int)vocData.majorVersion << std::endl;
     std::cout << "  Minor version: " << (int)vocData.minorVersion << std::endl;
