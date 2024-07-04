@@ -5,7 +5,9 @@
 #include <iostream>
 #include <algorithm>
 #include <fstream>
-#include <cmath>
+
+#define _USE_MATH_DEFINES
+#include <math.h>
 
 std::vector<double> blackmanWindow(size_t length)
 {
@@ -93,7 +95,7 @@ void normalize(std::vector<double>& input, double fraction)
 std::vector<double> createLowpassFilter(double sampleRate, double cutoffFrequency, double transitionBandwidth)
 {
     // calculate filter length
-    size_t length = 4 * sampleRate / transitionBandwidth;
+    size_t length = static_cast<size_t>(4 * sampleRate / transitionBandwidth);
     if (length % 2 == 0) ++length;  // ensure length is odd
 
     // generate sinc
@@ -146,7 +148,7 @@ std::vector<uint8_t> toUint8Vector(const std::vector<double>& input)
     output.reserve(input.size());
     for (size_t i = 0; i < input.size(); ++i)
     {
-        output.push_back(std::round(std::clamp(input[i] * 128.0 + 128.0, 0.0, 255.0)));
+        output.push_back(static_cast<uint8_t>(std::round(std::clamp(input[i] * 128.0 + 128.0, 0.0, 255.0))));
     }
     return output;
 }
@@ -157,11 +159,11 @@ std::vector<int16_t> toInt16Vector(const std::vector<double>& input)
     output.reserve(input.size());
     for (size_t i = 0; i < input.size(); ++i)
     {
-        output.push_back(std::round(
+        output.push_back(static_cast<int16_t>(std::round(
             std::clamp(
                 input[i] * std::numeric_limits<int16_t>::max(),
                 (double)std::numeric_limits<int16_t>::min(),
-                (double)std::numeric_limits<int16_t>::max())));
+                (double)std::numeric_limits<int16_t>::max()))));
     }
     return output;
 }
@@ -172,11 +174,11 @@ std::vector<int32_t> toInt32Vector(const std::vector<double>& input)
     output.reserve(input.size());
     for (size_t i = 0; i < input.size(); ++i)
     {
-        output.push_back(std::round(
+        output.push_back(static_cast<int32_t>(std::round(
             std::clamp(
                 input[i] * std::numeric_limits<int32_t>::max(),
                 (double)std::numeric_limits<int32_t>::min(),
-                (double)std::numeric_limits<int32_t>::max())));
+                (double)std::numeric_limits<int32_t>::max()))));
     }
     return output;
 }

@@ -17,7 +17,7 @@ void write8bitMonoWaveFile(const std::string& filename, uint32_t sampleRate, con
     header.bitsPerSample = 8;
     header.bytesPerSample = 1;
     header.byteRate = header.sampleRate * header.numChannels * header.bytesPerSample;
-    header.chunkSize = data.size() + sizeof(WaveFileHeader);
+    header.chunkSize = static_cast<uint32_t>(data.size() + sizeof(WaveFileHeader));
     
     FILE* file = fopen(filename.c_str(), "wb");
     if (!file)
@@ -27,7 +27,7 @@ void write8bitMonoWaveFile(const std::string& filename, uint32_t sampleRate, con
 
     fwrite(&header, sizeof(WaveFileHeader), 1, file);
 
-    uint32_t subChunk2Size = data.size();
+    uint32_t subChunk2Size = static_cast<uint32_t>(data.size());
     fwrite("data", 1, 4, file);
     fwrite(&subChunk2Size, 4, 1, file);
 

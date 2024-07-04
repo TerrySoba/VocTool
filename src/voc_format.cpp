@@ -38,7 +38,7 @@ std::vector<uint8_t> createVocFile(
         throw std::runtime_error("Frequency too low for VOC file. Minimum frequency is 3908 Hz.");
     }
 
-    uint8_t timeConstant = round(256 - 1000000.0 / frequency);
+    uint8_t timeConstant = static_cast<uint8_t>(round(256 - 1000000.0 / frequency));
 
     std::string vocHeader = "Creative Voice File\x1a";
 
@@ -56,7 +56,7 @@ std::vector<uint8_t> createVocFile(
     append(out, (uint8_t)1); // sample header
 
     // now append size (3 bytes)
-    uint32_t sampleSize = sampleData.size() + 2;
+    uint32_t sampleSize = static_cast<uint32_t>(sampleData.size() + 2);
     out.push_back(sampleSize & 0xff);
     out.push_back(sampleSize >> 8 & 0xff);
     out.push_back(sampleSize >> 16 & 0xff);
@@ -123,8 +123,11 @@ VocFile readVocFile(const std::string &filename)
         throw std::runtime_error("Invalid VOC file. Header type is not 1.");
     }
 
-    uint32_t sampleSize;
-    safeRead(&sampleSize, 3, fp);
+    uint8_t sampleA, sampleB, sampleC;
+    safeRead(&sampleA, 1, fp);
+    safeRead(&sampleB, 1, fp);
+    safeRead(&sampleC, 1, fp);
+    uint32_t sampleSize = sampleA | (sampleB << 8) | (sampleC << 16);
 
     uint8_t timeConstant;
     safeRead(&timeConstant, 1, fp);

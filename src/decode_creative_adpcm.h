@@ -56,7 +56,7 @@ private:
 
 std::vector<uint8_t> breakBytes(const std::vector<uint8_t>& data, uint8_t bitsPerNibble)
 {
-    uint32_t nibbleCount = 0;
+    size_t nibbleCount = 0;
     if (bitsPerNibble == 4)
     {
         nibbleCount = data.size() * 2;

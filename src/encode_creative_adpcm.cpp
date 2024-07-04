@@ -61,7 +61,7 @@ std::vector<uint8_t> createAdpcm4BitFromRawOpenMP(const std::vector<uint8_t>& ra
 
         // try every possible input for the decoder
         #pragma omp parallel for
-        for (uint64_t n = 0; n < constPow(16, combinedNibbles); ++n)
+        for (int64_t n = 0; n < static_cast<int64_t>(constPow(16, combinedNibbles)); ++n)
         {
             CreativeAdpcmDecoder4Bit decoderCopy = decoder;
             uint64_t diffSum = 0;
@@ -182,7 +182,7 @@ std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw, uin
         // if (i % 10 == 0) printf("%d\n", i);
     }
 
-    printf("sum: %ld\n", squaredSum);
+    // printf("sum: %ld\n", squaredSum);
 
     std::vector<uint8_t> nibbles(result.size() * combinedNibbles);
     for (size_t i = 0; i < result.size(); ++i)
@@ -252,7 +252,7 @@ std::vector<uint8_t> createAdpcm2BitFromRaw(const std::vector<uint8_t>& raw, uin
         // if (i % 10 == 0) printf("%d\n", i);
     }
 
-    printf("sum: %ld\n", squaredSum);
+    // printf("sum: %ld\n", squaredSum);
 
     std::vector<uint8_t> nibbles(result.size() * combinedSamples);
     for (size_t i = 0; i < result.size(); ++i)

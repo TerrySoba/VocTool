@@ -12,6 +12,10 @@ enum WaveAudioFormat : uint16_t
     WAVE_FORMAT_IEEE_FLOAT = 3
 };
 
+#ifdef _MSC_VER
+    #pragma pack(push, 1)
+#endif
+
 struct WaveFileHeader
 {
     std::array<uint8_t, 4> chunkId;
@@ -25,7 +29,16 @@ struct WaveFileHeader
     uint32_t byteRate;
     uint16_t bytesPerSample;
     uint16_t bitsPerSample;
+
+#ifdef __GNUC__
 } __attribute__((packed));
+#else
+};
+#endif
+
+#ifdef _MSC_VER
+    #pragma pack(pop)
+#endif
 
 struct WaveFile
 {

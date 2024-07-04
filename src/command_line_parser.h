@@ -35,7 +35,7 @@ std::string makeParameterString(auto shortForm, auto name)
     return ss.str();
 }
 
-std::string makeSpaces(int num)
+std::string makeSpaces(size_t num)
 {
     std::string spaces(num, ' ');
     return spaces;
@@ -203,7 +203,7 @@ private:
         std::cout << "\n\n" << m_programDescription << "\n\n";
         std::cout << "options:\n";
 
-        unsigned int longestLine = 0;
+        size_t longestLine = 0;
 
         for (auto param : m_parameters)
         {
