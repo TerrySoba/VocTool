@@ -37,21 +37,19 @@ target_link_libraries(${PROJECT_NAME}
     ${PROJECT_NAME}_lib
 )
 
-if(UNIX)
-    add_executable(${PROJECT_NAME}_test
-        src/test/resampling_test.cpp
-        src/test/detect_file_format_test.cpp
-        src/test/voc_format_test.cpp
-        )
-
-    target_link_libraries(${PROJECT_NAME}_test
-        ${PROJECT_NAME}_lib
-        Catch2::Catch2WithMain)
-
-    target_include_directories(${PROJECT_NAME}_test PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+add_executable(${PROJECT_NAME}_test
+    src/test/resampling_test.cpp
+    src/test/detect_file_format_test.cpp
+    src/test/voc_format_test.cpp
     )
 
-    target_compile_definitions(${PROJECT_NAME}_test PUBLIC TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/testdata\")
-endif(UNIX)
+target_link_libraries(${PROJECT_NAME}_test
+    ${PROJECT_NAME}_lib
+    Catch2::Catch2WithMain)
+
+target_include_directories(${PROJECT_NAME}_test PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_compile_definitions(${PROJECT_NAME}_test PUBLIC TEST_DATA_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/testdata\")
