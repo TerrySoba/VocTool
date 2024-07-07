@@ -64,8 +64,8 @@ jobs:
       run: |
         git clone https://github.com/catchorg/Catch2.git
         cd Catch2
-        cmake -B build -S . -DBUILD_TESTING=OFF -DCMAKE_BUILD_TYPE=Release
-        cmake --build build/ --target install
+        cmake -B build -S . -DBUILD_TESTING=OFF
+        cmake --build build/ --config Release --target install
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
