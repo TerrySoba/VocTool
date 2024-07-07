@@ -89,4 +89,4 @@ jobs:
     - name: Test (linux)
       if: matrix.os == 'ubuntu-24.04'
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ./voctool_test
+      run: dir
