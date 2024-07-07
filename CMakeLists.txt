@@ -41,6 +41,7 @@ if(UNIX)
     add_executable(${PROJECT_NAME}_test
         src/test/resampling_test.cpp
         src/test/detect_file_format_test.cpp
+        src/test/voc_format_test.cpp
         )
 
     target_link_libraries(${PROJECT_NAME}_test
