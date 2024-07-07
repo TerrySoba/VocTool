@@ -84,7 +84,7 @@ jobs:
     - name: Test (windows)
       if: matrix.os == 'windows-latest'
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: dir
+      run: Release\voctool_test.exe
 
     - name: Test (linux)
       if: matrix.os == 'ubuntu-24.04'
