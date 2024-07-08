@@ -44,6 +44,25 @@ std::vector<uint8_t> readRaw(const std::string& filename)
 }
 
 
+template <typename SampleType>
+bool vectorsAreEqual(const std::vector<SampleType>& a, const std::vector<SampleType>& b)
+{
+    if (a.size() != b.size())
+    {
+        std::cout << "Size mismatch: " << a.size() << " != " << b.size() << std::endl;
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i)
+    {
+        if (a[i] != b[i])
+        {
+            std::cout << "Mismatch at index " << i << ": " << a[i] << " != " << b[i] << std::endl;
+            return false;
+        }
+    }
+    return true;
 }
+
+} // annonymous namespace
 
 #endif

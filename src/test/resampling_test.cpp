@@ -59,7 +59,7 @@ TEST_CASE("Conversion Tests uint32_t")
     REQUIRE(output.size() == input.size());
     REQUIRE(output2.size() == input.size());
 
-    REQUIRE(input == output2);
+    REQUIRE(vectorsAreEqual(input, output2));
 }
 
 
@@ -90,8 +90,9 @@ TEST_CASE("LoadWaveTest 16bit")
     REQUIRE(waveFile.header.audioFormat == WAVE_FORMAT_PCM);
 
     REQUIRE(
-        readRaw(getTestDataDir() + "/16bit_mono_48000.raw") ==
-        waveFile.rawData);
+        vectorsAreEqual(
+            readRaw(getTestDataDir() + "/16bit_mono_48000.raw"),
+            waveFile.rawData));
 }
 
 TEST_CASE("LoadWaveTest 24bit")
@@ -105,8 +106,9 @@ TEST_CASE("LoadWaveTest 24bit")
     REQUIRE(waveFile.header.audioFormat == WAVE_FORMAT_PCM);
 
     REQUIRE(
-        readRaw(getTestDataDir() + "/24bit_mono_44100.raw") ==
-        waveFile.rawData);
+        vectorsAreEqual(
+            readRaw(getTestDataDir() + "/24bit_mono_44100.raw"),
+            waveFile.rawData));
 }
 
 TEST_CASE("LoadWaveTest 32bit float")
@@ -120,8 +122,9 @@ TEST_CASE("LoadWaveTest 32bit float")
     REQUIRE(waveFile.header.audioFormat == WAVE_FORMAT_IEEE_FLOAT);
 
     REQUIRE(
-        readRaw(getTestDataDir() + "/32bit_float_mono_48000.raw") ==
-        waveFile.rawData);
+        vectorsAreEqual(
+            readRaw(getTestDataDir() + "/32bit_float_mono_48000.raw"),
+            waveFile.rawData));
 }
 
 TEST_CASE("Resampling Test")
