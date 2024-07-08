@@ -36,11 +36,26 @@ void dumpRaw(const std::vector<SampleType>& input, const std::string& filename)
 
 std::vector<uint8_t> readRaw(const std::string& filename)
 {
-    std::ifstream t(filename);
-    std::stringstream buffer;
-    buffer << t.rdbuf();
-    std::string str = buffer.str();
-    return std::vector<uint8_t>(str.begin(), str.end());
+    FILE* file = fopen(filename.c_str(), "rb");
+    if (!file)
+    {
+        throw std::runtime_error("Could not open file " + filename);
+    }
+
+    fseek(file, 0, SEEK_END);
+    size_t size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    std::vector<uint8_t> buffer(size);
+    auto count = fread(buffer.data(), 1, size, file);
+    fclose(file);
+
+    if (count != size)
+    {
+        throw std::runtime_error("Could not read file " + filename + " completely.");
+    }
+
+    return buffer;
 }
 
 
