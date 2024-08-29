@@ -3,6 +3,12 @@ project(voctool)
 set(CMAKE_CXX_STANDARD 20)
 
 find_package(Catch2 REQUIRED)
+if(Catch2_VERSION VERSION_GREATER_EQUAL 3.0)
+    set(CATCH2_INCLUDE_FILE "catch2/catch_test_macros.hpp")
+else()
+    set(CATCH2_INCLUDE_FILE "catch2/catch.hpp")
+endif()
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/test/catch_importer.h.in ${CMAKE_BINARY_DIR}/catch_importer.h)
 
 #find_package(vectorclass REQUIRED)
 find_package(OpenMP REQUIRED)
@@ -40,6 +46,10 @@ add_executable(${PROJECT_NAME}_test
     src/test/detect_file_format_test.cpp
     src/test/voc_format_test.cpp
     )
+
+target_include_directories(${PROJECT_NAME}_test PRIVATE 
+    ${CMAKE_BINARY_DIR}
+)
 
 target_link_libraries(${PROJECT_NAME}_test
     ${PROJECT_NAME}_lib

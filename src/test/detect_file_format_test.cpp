@@ -1,5 +1,4 @@
-#include <catch2/catch_test_macros.hpp>
-
+#include "catch_importer.h"
 #include "test_helper.h"
 
 #include "detect_file_format.h"

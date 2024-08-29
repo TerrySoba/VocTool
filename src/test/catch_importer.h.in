@@ -1,0 +1,10 @@
+#ifndef CATCH_IMPORTER_H
+#define CATCH_IMPORTER_H
+
+/*
+ * This file is used to support multiple versions of Catch2.
+ * Just include this file instead of including the Catch2 header directly.
+ */
+#include <@CATCH2_INCLUDE_FILE@>
+
+#endif
