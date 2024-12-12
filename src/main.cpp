@@ -1,7 +1,9 @@
 #include "file_tools.h"
 #include "command_line_parser.h"
 #include "voc_format.h"
-#include "encode_creative_adpcm_simd.h"
+#if defined(__x86_64__)
+    #include "encode_creative_adpcm_simd.h"
+#endif
 #include "encode_creative_adpcm.h"
 #include "read_wave.h"
 #include "resampling.h"
@@ -77,7 +79,11 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
     case VOC_FORMAT_ADPCM_4BIT:
     {
         printf("Output format: ADPCM 4-bit\n");
+#if defined(__x86_64__)
         sampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
+#else
+        sampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
+#endif
         break;
     }
     case VOC_FORMAT_ADPCM_2BIT:
