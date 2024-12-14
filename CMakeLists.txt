@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(USE_X86_SIMD false)
 set(USE_ARM_SIMD false)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86|i[3-6]86")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86|i[3-6]86|AMD64")
     message(STATUS "Building for x86/x86_64")
     set(USE_X86_SIMD true)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
