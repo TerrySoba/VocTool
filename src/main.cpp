@@ -4,6 +4,9 @@
 #if defined(__x86_64__)
     #include "encode_creative_adpcm_simd.h"
 #endif
+#if defined(__aarch64__)
+    #include "encode_creative_adpcm_neon.h"
+#endif
 #include "encode_creative_adpcm.h"
 #include "read_wave.h"
 #include "resampling.h"
@@ -81,6 +84,8 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         printf("Output format: ADPCM 4-bit\n");
 #if defined(__x86_64__)
         sampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
+#elif defined(__aarch64__)
+        sampleData = createAdpcm4BitFromRawNeon(raw, parser.getValue<uint64_t>("level"));
 #else
         sampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
 #endif

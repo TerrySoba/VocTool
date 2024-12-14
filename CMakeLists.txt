@@ -2,16 +2,18 @@ cmake_minimum_required(VERSION 3.9)
 project(voctool)
 set(CMAKE_CXX_STANDARD 20)
 
+set(USE_X86_SIMD false)
+set(USE_ARM_SIMD false)
+
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i[3-6]86")
     message(STATUS "Building for x86/x86_64")
-    set(USE_VECTORCLASS true)
+    set(USE_X86_SIMD true)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     message(STATUS "Building for ARM64")
-    set(USE_VECTORCLASS false)
+    set(USE_ARM_SIMD true)
 else()
     message(FATAL_ERROR "Unsupported architecture")
 endif()
-
 
 find_package(Catch2 REQUIRED)
 if(Catch2_VERSION VERSION_GREATER_EQUAL 3.0)
@@ -21,10 +23,9 @@ else()
 endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/test/catch_importer.h.in ${CMAKE_BINARY_DIR}/catch_importer.h)
 
-#find_package(vectorclass REQUIRED)
 find_package(OpenMP REQUIRED)
 
-if (USE_VECTORCLASS)
+if (USE_X86_SIMD)
     add_library(vectorclass INTERFACE)
 
     target_include_directories(vectorclass INTERFACE
@@ -42,7 +43,13 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/detect_file_format.cpp
 )
 
-if (USE_VECTORCLASS)
+if (USE_ARM_SIMD)
+    target_sources(${PROJECT_NAME}_lib PRIVATE
+        src/encode_creative_adpcm_neon.cpp
+    )
+endif()
+
+if (USE_X86_SIMD)
     target_sources(${PROJECT_NAME}_lib PRIVATE
         src/encode_creative_adpcm_simd.cpp
     )
