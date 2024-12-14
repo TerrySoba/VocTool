@@ -1,18 +1,18 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.20)
 project(voctool)
 set(CMAKE_CXX_STANDARD 20)
 
 set(USE_X86_SIMD false)
 set(USE_ARM_SIMD false)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|i[3-6]86")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86|i[3-6]86")
     message(STATUS "Building for x86/x86_64")
     set(USE_X86_SIMD true)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    message(STATUS "Building for ARM64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
+    message(STATUS "Building for ARM/ARM64")
     set(USE_ARM_SIMD true)
 else()
-    message(FATAL_ERROR "Unsupported architecture")
+    message(FATAL_ERROR "Unsupported architecture: " ${CMAKE_SYSTEM_PROCESSOR})
 endif()
 
 find_package(Catch2 REQUIRED)
