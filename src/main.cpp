@@ -7,11 +7,13 @@
 #if defined(__aarch64__)
     #include "encode_creative_adpcm_neon.h"
 #endif
+#include "decode_creative_adpcm.h"
 #include "encode_creative_adpcm.h"
 #include "read_wave.h"
 #include "resampling.h"
 #include "detect_file_format.h"
 #include "write_wave.h"
+#include "compare_audio.h"
 
 #include <iostream>
 #include <map>
@@ -76,31 +78,41 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
 
     auto raw = toUint8Vector(waveFile.data);
 
-    std::vector<uint8_t> sampleData;
+    std::vector<uint8_t> encodedSampleData;
     switch (format)
     {
     case VOC_FORMAT_ADPCM_4BIT:
     {
         printf("Output format: ADPCM 4-bit\n");
 #if defined(__x86_64__)
-        sampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
+        encodedSampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
+        // encodedSampleData = createAdpcm4BitFromRawTrellis(raw, parser.getValue<uint64_t>("level"));
 #elif defined(__aarch64__)
-        sampleData = createAdpcm4BitFromRawNeon(raw, parser.getValue<uint64_t>("level"));
+        encodedSampleData = createAdpcm4BitFromRawNeon(raw, parser.getValue<uint64_t>("level"));
 #else
-        sampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
+        encodedSampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
 #endif
+
+        auto decodedSampleData = decodeAdpcm4(
+            encodedSampleData.front(),
+            std::span<uint8_t>(encodedSampleData).subspan(1));
+        
+        auto difference = computeAudioDifference(raw, decodedSampleData, waveFile.sampleRate);
+        printf("  Average difference after encoding and decoding: %.2f\n", difference.averageDifference);
+        printf("  Max difference after encoding and decoding: %.2f\n", difference.maxDifference);
+
         break;
     }
     case VOC_FORMAT_ADPCM_2BIT:
     {
         printf("Output format: ADPCM 2-bit\n");
-        sampleData = createAdpcm2BitFromRaw(raw, parser.getValue<uint64_t>("level"));
+        encodedSampleData = createAdpcm2BitFromRaw(raw, parser.getValue<uint64_t>("level"));
         break;
     }
     case VOC_FORMAT_PCM_8BIT:
     {
         printf("Output format: PCM 8-bit\n");
-        sampleData = raw;
+        encodedSampleData = raw;
         break;
     }
     case VOC_FORMAT_ADPCM_3BIT:
@@ -109,7 +121,7 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         return 1;
     }
     }
-    std::vector<uint8_t> vocData = createVocFile(waveFile.sampleRate, sampleData, format);
+    std::vector<uint8_t> vocData = createVocFile(waveFile.sampleRate, encodedSampleData, format);
     storeFile(parser.getValue<std::string>("output"), vocData);
     return 0;
 }

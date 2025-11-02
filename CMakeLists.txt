@@ -41,6 +41,7 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/resampling.cpp
     src/encode_creative_adpcm.cpp
     src/detect_file_format.cpp
+    src/compare_audio.cpp
 )
 
 if (USE_ARM_SIMD)

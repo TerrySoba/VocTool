@@ -4,6 +4,11 @@
 #include "omp.h"
 
 #include <limits>
+#include <cassert>
+#include <memory>
+#include <iostream>
+#include <random>
+#include <algorithm>
 
 uint64_t getNthNibble(int n, uint64_t value)
 {
@@ -205,6 +210,134 @@ std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw, uin
 
     return binaryResult;
 }
+
+
+struct TrellisBranch
+{
+    TrellisBranch(uint8_t firstValue) :
+        decoder(firstValue)
+    {
+    }
+    CreativeAdpcmDecoder4Bit decoder;
+    std::vector<uint8_t> history;
+    uint64_t squaredDiff = 0;
+};
+
+
+std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& raw, uint32_t maxBranches)
+{
+    assert(!raw.empty());
+
+    int randomBranches = maxBranches / 2; // 50% random branches
+    
+    // Initialize random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    // Initialize trellis branches, we need maxBranches * 16 + maxBranches branches to cover all possibilities
+    std::vector<std::shared_ptr<TrellisBranch>> trellisBranches;
+    for (int i = 0; i < maxBranches * 16 + maxBranches; ++i)
+    {
+        auto branch = std::make_shared<TrellisBranch>(raw.front());
+        branch->history.reserve(raw.size());
+        trellisBranches.push_back(branch);
+    }
+
+    for (int pos = 1; pos < raw.size(); ++pos)
+    {
+        // first sort branches by squaredDiff
+        std::sort(trellisBranches.begin(), trellisBranches.begin() + maxBranches * 16,
+            [](const std::shared_ptr<TrellisBranch>& a, const std::shared_ptr<TrellisBranch>& b)
+            {
+                return a->squaredDiff < b->squaredDiff;
+            });
+        
+        // Select random branches from the sorted list (excluding the best ones we'll keep anyway)
+        // We sample from branches beyond the top (maxBranches - randomBranches) to add diversity
+        int numBestBranches = maxBranches - randomBranches;
+        if (maxBranches * 16 > numBestBranches + randomBranches)
+        {
+            // Create a distribution for selecting random branches from the remaining pool
+            std::uniform_int_distribution<> distrib(numBestBranches, maxBranches * 16 - 1);
+            
+            // Collect random indices
+            std::vector<int> randomIndices;
+            for (int i = 0; i < randomBranches; ++i)
+            {
+                randomIndices.push_back(distrib(gen));
+            }
+            
+            // Sort random indices to avoid duplicates and maintain order
+            std::sort(randomIndices.begin(), randomIndices.end());
+            randomIndices.erase(std::unique(randomIndices.begin(), randomIndices.end()), randomIndices.end());
+            
+            // Move random branches to fill the slots after the best branches
+            int targetSlot = numBestBranches;
+            for (int srcIdx : randomIndices)
+            {
+                if (targetSlot < maxBranches)
+                {
+                    std::swap(trellisBranches[targetSlot], trellisBranches[srcIdx]);
+                    ++targetSlot;
+                }
+            }
+        }
+        
+        // std::cout << "Best diff: " << trellisBranches.front()->squaredDiff << "\n";
+
+        #pragma omp parallel for
+        for (int branchNo = 0; branchNo < maxBranches; ++branchNo)
+        {
+            for (uint8_t nibble = 0; nibble < 16; ++nibble)
+            {
+                auto& currentBranch = trellisBranches[branchNo];
+                auto decoderCopy = currentBranch->decoder;
+                uint8_t decodedValue = decoderCopy.decodeNibble(nibble);
+                int32_t diff = (int32_t)decodedValue - (int32_t)raw[pos];
+                uint64_t newSquaredDiff = currentBranch->squaredDiff + diff * diff;
+                auto& newBranch = trellisBranches[ maxBranches + branchNo * 16 + nibble ];
+                newBranch->decoder = decoderCopy;
+                newBranch->squaredDiff = newSquaredDiff;
+                newBranch->history = currentBranch->history;
+                newBranch->history.push_back(nibble);
+            }
+        }
+
+        // move the first maxBranches branches to the back, so they will be ignored in next sorting
+        for (int branchNo = 0; branchNo < maxBranches; ++branchNo)
+        {
+            trellisBranches.push_back(trellisBranches.front());
+            trellisBranches.erase(trellisBranches.begin());
+        }
+    }
+
+    // find best branch
+    std::shared_ptr<TrellisBranch> bestBranch = trellisBranches.front();
+    for (int i = 0; i < maxBranches * 16; ++i)
+    {
+        if (trellisBranches[i]->squaredDiff < bestBranch->squaredDiff)
+        {
+            bestBranch = trellisBranches[i];
+        }
+    }
+
+
+    std::vector<uint8_t> nibbles = bestBranch->history;
+    std::vector<uint8_t> binaryResult(nibbles.size() / 2);
+
+    // merge nibbles into bytes
+    for (size_t n = 0; n < nibbles.size() / 2; ++n)
+    {
+        binaryResult[n] = ((nibbles[2 * n] << 4) + (nibbles[2 * n + 1]));
+    }
+
+    binaryResult.insert(binaryResult.begin(), raw[0]);
+
+    return binaryResult;
+}
+
+
+
 
 struct Best2bit
 {

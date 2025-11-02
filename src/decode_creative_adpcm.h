@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <stdexcept>
+#include <span>
 
 namespace {
 
@@ -54,7 +55,7 @@ private:
 
 
 
-std::vector<uint8_t> breakBytes(const std::vector<uint8_t>& data, uint8_t bitsPerNibble)
+std::vector<uint8_t> breakBytes(const std::span<uint8_t>& data, uint8_t bitsPerNibble)
 {
     size_t nibbleCount = 0;
     if (bitsPerNibble == 4)
@@ -93,7 +94,7 @@ std::vector<uint8_t> breakBytes(const std::vector<uint8_t>& data, uint8_t bitsPe
 }
 
 
-std::vector<uint8_t> decodeAdpcm4(uint8_t initial, std::vector<uint8_t> data)
+std::vector<uint8_t> decodeAdpcm4(uint8_t initial, const std::span<uint8_t>& data)
 {
     auto nibbles = breakBytes(data, 4);
 
