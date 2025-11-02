@@ -38,6 +38,37 @@ std::string vocSampleFormatToString(VocSampleFormat format)
 }
 
 
+enum class AdpcmEncoderAlgorithm
+{
+    combined,
+    trellis
+};
+
+AdpcmEncoderAlgorithm getAdpcmEncoderAlgorithm(const clp::CommandLineParser& parser)
+{
+    try
+    {
+        std::string algoStr = parser.getValue<std::string>("algorithm");
+        if (algoStr == "combined")
+        {
+            return AdpcmEncoderAlgorithm::combined;
+        }
+        else if (algoStr == "trellis")
+        {
+            return AdpcmEncoderAlgorithm::trellis;
+        }
+        else
+        {
+            throw std::runtime_error("invalid algorithm");
+        }
+    }
+    catch (...)
+    {
+        throw std::runtime_error("invalid algorithm");
+    }
+}
+
+
 int convertWaveToVoc(const clp::CommandLineParser& parser)
 {
     VocSampleFormat format;
@@ -79,20 +110,28 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
     auto raw = toUint8Vector(waveFile.data);
 
     std::vector<uint8_t> encodedSampleData;
+
+    AdpcmEncoderAlgorithm algorithm = getAdpcmEncoderAlgorithm(parser);
+
     switch (format)
     {
     case VOC_FORMAT_ADPCM_4BIT:
     {
         printf("Output format: ADPCM 4-bit\n");
+        if (algorithm == AdpcmEncoderAlgorithm::combined)
+        {
 #if defined(__x86_64__)
-        encodedSampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
-        // encodedSampleData = createAdpcm4BitFromRawTrellis(raw, parser.getValue<uint64_t>("level"));
+            encodedSampleData = createAdpcm4BitFromRawSIMD(raw, parser.getValue<uint64_t>("level"));
 #elif defined(__aarch64__)
-        encodedSampleData = createAdpcm4BitFromRawNeon(raw, parser.getValue<uint64_t>("level"));
+            encodedSampleData = createAdpcm4BitFromRawNeon(raw, parser.getValue<uint64_t>("level"));
 #else
-        encodedSampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
+            encodedSampleData = createAdpcm4BitFromRaw(raw, parser.getValue<uint64_t>("level"));
 #endif
-
+        }
+        else if (algorithm == AdpcmEncoderAlgorithm::trellis)
+        {
+            encodedSampleData = createAdpcm4BitFromRawTrellis(raw, parser.getValue<uint32_t>("level"));
+        }
         auto decodedSampleData = decodeAdpcm4(
             encodedSampleData.front(),
             std::span<uint8_t>(encodedSampleData).subspan(1));
@@ -171,7 +210,7 @@ int main(int argc, char* argv[])
         parser.addParameter("level", "l", "Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow.", clp::ParameterRequired::no, "4");
         parser.addParameter("cutoff", "C", "Cutoff frequency for lowpass filter in Hz. Default is half of sampling frequency.", clp::ParameterRequired::no);
         parser.addParameter("transition", "T", "Transition bandwidth for lowpass filter in Hz. Default is 1/10 of sampling frequency.", clp::ParameterRequired::no);
-
+        parser.addParameter("algorithm", "a", "ADPCM encoder to be used, options are: combined (default) and trellis", clp::ParameterRequired::no, "combined");
         parser.parse(argc, argv);
 
         auto detectedFormat = detectFileFormat(parser.getValue<std::string>("input"));
