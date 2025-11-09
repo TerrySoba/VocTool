@@ -218,10 +218,33 @@ struct TrellisBranch
         decoder(firstValue)
     {
     }
+
+    TrellisBranch(const CreativeAdpcmDecoder4Bit& dec, std::shared_ptr<TrellisBranch> p, uint8_t nib, uint64_t diff) :
+        decoder(dec), parent(p), nibble(nib), squaredDiff(diff)
+    {
+    }
+    
     CreativeAdpcmDecoder4Bit decoder;
-    std::vector<uint8_t> history;
+    std::shared_ptr<TrellisBranch> parent;  // Points to parent branch instead of copying history
+    uint8_t nibble = 0;                      // Only this branch's nibble
     uint64_t squaredDiff = 0;
 };
+
+// Reconstruct history by walking back through parent pointers
+std::vector<uint8_t> reconstructHistory(const std::shared_ptr<TrellisBranch>& branch) {
+    std::vector<uint8_t> history;
+    auto current = branch;
+    
+    // Walk back through parents, collecting nibbles
+    while (current->parent) {
+        history.push_back(current->nibble);
+        current = current->parent;
+    }
+    
+    // Reverse because we collected from end to beginning
+    std::reverse(history.begin(), history.end());
+    return history;
+}
 
 
 std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& raw, uint32_t maxBranches)
@@ -239,7 +262,6 @@ std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& r
     for (int i = 0; i < maxBranches * 16 + maxBranches; ++i)
     {
         auto branch = std::make_shared<TrellisBranch>(raw.front());
-        branch->history.reserve(raw.size());
         trellisBranches.push_back(branch);
     }
 
@@ -296,19 +318,14 @@ std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& r
                 int32_t diff = (int32_t)decodedValue - (int32_t)raw[pos];
                 uint64_t newSquaredDiff = currentBranch->squaredDiff + diff * diff;
                 auto& newBranch = trellisBranches[ maxBranches + branchNo * 16 + nibble ];
-                newBranch->decoder = decoderCopy;
-                newBranch->squaredDiff = newSquaredDiff;
-                newBranch->history = currentBranch->history;
-                newBranch->history.push_back(nibble);
+                
+                // Create new branch using the constructor that links to parent
+                newBranch = std::make_shared<TrellisBranch>(decoderCopy, currentBranch, nibble, newSquaredDiff);
             }
         }
 
         // move the first maxBranches branches to the back, so they will be ignored in next sorting
-        for (int branchNo = 0; branchNo < maxBranches; ++branchNo)
-        {
-            trellisBranches.push_back(trellisBranches.front());
-            trellisBranches.erase(trellisBranches.begin());
-        }
+        std::rotate(trellisBranches.begin(), trellisBranches.begin() + maxBranches, trellisBranches.begin() + maxBranches * 17);
     }
 
     // find best branch
@@ -321,8 +338,8 @@ std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& r
         }
     }
 
-
-    std::vector<uint8_t> nibbles = bestBranch->history;
+    // Reconstruct history by walking back through parent chain
+    std::vector<uint8_t> nibbles = reconstructHistory(bestBranch);
     std::vector<uint8_t> binaryResult(nibbles.size() / 2);
 
     // merge nibbles into bytes
