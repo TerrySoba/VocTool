@@ -3,7 +3,7 @@
 
 #include <string>
 #include <cmath>
-#include <cstdio>
+#include <fstream>
 #include <stdexcept>
 #include <cstring>
 #include <iostream>
@@ -71,9 +71,9 @@ std::vector<uint8_t> createVocFile(
     return out;
 }
 
-void safeRead(void* buffer, size_t size, FILE* fp)
+void safeRead(void* buffer, size_t size, std::ifstream& file)
 {
-    if (fread(buffer, 1, size, fp) != size)
+    if (!file.read(static_cast<char*>(buffer), size))
     {
         throw std::runtime_error("Could not read from file");
     }
@@ -86,15 +86,15 @@ uint32_t timeConstantToFrequency(uint8_t timeConstant)
 
 VocFile readVocFile(const std::string &filename)
 {
-    FILE* fp = fopen(filename.c_str(), "rb");
-    if (!fp)
+    std::ifstream file(filename, std::ios::binary);
+    if (!file)
     {
         throw std::runtime_error("Could not open file: " +  filename);
     }
 
     std::string vocHeader = "Creative Voice File\x1a";
     uint8_t buffer[128];
-    safeRead(buffer, vocHeader.size(), fp);
+    safeRead(buffer, vocHeader.size(), file);
 
     if (memcmp(buffer, vocHeader.c_str(), vocHeader.size()) != 0)
     {
@@ -102,13 +102,13 @@ VocFile readVocFile(const std::string &filename)
     }
 
     uint16_t dummy;
-    safeRead(&dummy, 2, fp);
+    safeRead(&dummy, 2, file);
 
     uint16_t version;
-    safeRead(&version, 2, fp);
+    safeRead(&version, 2, file);
 
     uint16_t versionCheck;
-    safeRead(&versionCheck, 2, fp);
+    safeRead(&versionCheck, 2, file);
 
     if ((~version + 0x1234) != versionCheck)
     {
@@ -116,7 +116,7 @@ VocFile readVocFile(const std::string &filename)
     }
 
     uint8_t headerType;
-    safeRead(&headerType, 1, fp);
+    safeRead(&headerType, 1, file);
 
     if (headerType != 1)
     {
@@ -124,19 +124,19 @@ VocFile readVocFile(const std::string &filename)
     }
 
     uint8_t sampleA, sampleB, sampleC;
-    safeRead(&sampleA, 1, fp);
-    safeRead(&sampleB, 1, fp);
-    safeRead(&sampleC, 1, fp);
+    safeRead(&sampleA, 1, file);
+    safeRead(&sampleB, 1, file);
+    safeRead(&sampleC, 1, file);
     uint32_t sampleSize = sampleA | (sampleB << 8) | (sampleC << 16);
 
     uint8_t timeConstant;
-    safeRead(&timeConstant, 1, fp);
+    safeRead(&timeConstant, 1, file);
 
     uint8_t sampleFormat;
-    safeRead(&sampleFormat, 1, fp);
+    safeRead(&sampleFormat, 1, file);
 
     std::vector<uint8_t> sampleData(sampleSize - 2);
-    safeRead(sampleData.data(), sampleSize - 2, fp);
+    safeRead(sampleData.data(), sampleSize - 2, file);
 
     VocFile result = {
         timeConstant,
