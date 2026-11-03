@@ -3,14 +3,28 @@
 
 #include <cstdint>
 #include <vector>
-#include <optional>
+#include <string>
 
+enum class ResamplerQuality
+{
+    best,    // libsamplerate SRC_SINC_BEST_QUALITY
+    medium,  // libsamplerate SRC_SINC_MEDIUM_QUALITY
+    fast,    // libsamplerate SRC_SINC_FASTEST
+    linear   // libsamplerate SRC_LINEAR
+};
+
+ResamplerQuality resamplerQualityFromString(const std::string& name);
+
+/**
+ * @brief Resamples mono audio data using libsamplerate.
+ *
+ * Anti-aliasing filtering is handled by libsamplerate's band-limited sinc converters.
+ */
 std::vector<double> resample(
     const std::vector<double>& inputData,
     uint32_t inputSampleRate,
     uint32_t outputSampleRate,
-    std::optional<double> cutoffFrequency = {},
-    std::optional<double> transitionBandwidth = {});
+    ResamplerQuality quality = ResamplerQuality::best);
 
 std::vector<double> toDoubleVector(const std::vector<int32_t>& input);
 std::vector<double> toDoubleVector(const std::vector<int16_t>& input);

@@ -96,8 +96,7 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
             waveFile.data,
             waveFile.sampleRate,
             *targetSampleRate,
-            parser.getValueOptional<double>("cutoff"),
-            parser.getValueOptional<double>("transition"));
+            resamplerQualityFromString(parser.getValue<std::string>("resampler")));
         waveFile.sampleRate = *targetSampleRate;
     }
 
@@ -208,8 +207,7 @@ int main(int argc, char* argv[])
         parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
         parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
         parser.addParameter("level", "l", "Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow.", clp::ParameterRequired::no, "4");
-        parser.addParameter("cutoff", "C", "Cutoff frequency for lowpass filter in Hz. Default is half of sampling frequency.", clp::ParameterRequired::no);
-        parser.addParameter("transition", "T", "Transition bandwidth for lowpass filter in Hz. Default is 1/10 of sampling frequency.", clp::ParameterRequired::no);
+        parser.addParameter("resampler", "r", "Resampler quality (libsamplerate). Options: best, medium, fast, linear", clp::ParameterRequired::no, "best");
         parser.addParameter("algorithm", "a", "ADPCM encoder to be used, options are: combined (default) and trellis", clp::ParameterRequired::no, "combined");
         parser.parse(argc, argv);
 

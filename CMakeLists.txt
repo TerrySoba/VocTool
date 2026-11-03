@@ -25,6 +25,14 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/test/catch_importer.h.in ${CMAKE_
 
 find_package(OpenMP REQUIRED)
 
+# libsamplerate: prefer its CMake package config, fall back to pkg-config
+find_package(SampleRate CONFIG QUIET)
+if(NOT TARGET SampleRate::samplerate)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+    add_library(SampleRate::samplerate ALIAS PkgConfig::SAMPLERATE)
+endif()
+
 if (USE_X86_SIMD)
     add_library(vectorclass INTERFACE)
 
@@ -60,7 +68,8 @@ if (USE_X86_SIMD)
 endif()
 
 target_link_libraries(${PROJECT_NAME}_lib
-    PUBLIC OpenMP::OpenMP_CXX)
+    PUBLIC OpenMP::OpenMP_CXX
+    PRIVATE SampleRate::samplerate)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp

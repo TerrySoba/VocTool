@@ -7,6 +7,7 @@
 #include "test_helper.h"
 
 #include <memory>
+#include <cmath>
 
 TEST_CASE("Conversion Tests uint8_t")
 {
@@ -158,3 +159,47 @@ TEST_CASE("Resampling Test")
 
 
 
+static double rms(const std::vector<double>& data, size_t skip)
+{
+    double sum = 0;
+    for (size_t i = skip; i < data.size() - skip; ++i)
+    {
+        sum += data[i] * data[i];
+    }
+    return std::sqrt(sum / (data.size() - 2 * skip));
+}
+
+static std::vector<double> sineWave(double frequency, uint32_t sampleRate, size_t length)
+{
+    std::vector<double> output(length);
+    for (size_t i = 0; i < length; ++i)
+    {
+        output[i] = 0.5 * std::sin(2.0 * 3.14159265358979323846 * frequency * i / sampleRate);
+    }
+    return output;
+}
+
+TEST_CASE("Resampling keeps passband and removes aliasing")
+{
+    const uint32_t inputRate = 48000;
+    const uint32_t outputRate = 8000;
+
+    // 1 kHz is well below the output Nyquist frequency and must be kept
+    auto passband = resample(sineWave(1000, inputRate, inputRate), inputRate, outputRate);
+    REQUIRE(passband.size() == outputRate);
+    REQUIRE(std::abs(rms(passband, 100) - 0.5 / std::sqrt(2.0)) < 0.005);
+
+    // 6 kHz is above the output Nyquist frequency and must be filtered out
+    auto stopband = resample(sineWave(6000, inputRate, inputRate), inputRate, outputRate);
+    REQUIRE(stopband.size() == outputRate);
+    REQUIRE(rms(stopband, 100) < 0.001);
+}
+
+TEST_CASE("Resampler quality from string")
+{
+    REQUIRE(resamplerQualityFromString("best") == ResamplerQuality::best);
+    REQUIRE(resamplerQualityFromString("medium") == ResamplerQuality::medium);
+    REQUIRE(resamplerQualityFromString("fast") == ResamplerQuality::fast);
+    REQUIRE(resamplerQualityFromString("linear") == ResamplerQuality::linear);
+    REQUIRE_THROWS(resamplerQualityFromString("foo"));
+}

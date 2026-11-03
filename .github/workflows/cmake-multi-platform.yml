@@ -54,10 +54,10 @@ jobs:
       run: |
         echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
-    - name: Install Catch2
+    - name: Install dependencies
       if: matrix.os == 'ubuntu-24.04'
       run: |
-        sudo apt-get install -y catch2 libomp-dev
+        sudo apt-get install -y catch2 libomp-dev libsamplerate0-dev pkg-config
 
     - name: Install Catch2
       if: matrix.os == 'windows-latest'
@@ -67,6 +67,15 @@ jobs:
         cmake -B build -S . -DBUILD_TESTING=OFF
         cmake --build build/ --config Release --target install
 
+    - name: Install libsamplerate
+      if: matrix.os == 'windows-latest'
+      run: |
+        git clone --depth 1 --branch 0.2.2 https://github.com/libsndfile/libsamplerate.git
+        cd libsamplerate
+        cmake -B build -S . -DBUILD_TESTING=OFF -DLIBSAMPLERATE_EXAMPLES=OFF -DLIBSAMPLERATE_INSTALL=ON
+        cmake --build build/ --config Release
+        cmake --install build/ --config Release --prefix "${{ github.workspace }}/deps"
+
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
@@ -75,6 +84,7 @@ jobs:
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCMAKE_PREFIX_PATH=${{ github.workspace }}/deps
         -S ${{ github.workspace }}
 
     - name: Build
