@@ -16,6 +16,7 @@ std::map <std::string, VocSampleFormat> compressionFormats =
 {
     {"PCM", VOC_FORMAT_PCM_8BIT},
     {"ADPCM4", VOC_FORMAT_ADPCM_4BIT},
+    {"ADPCM3", VOC_FORMAT_ADPCM_3BIT},
     {"ADPCM2", VOC_FORMAT_ADPCM_2BIT},
 };
 
@@ -112,8 +113,13 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
     }
     case VOC_FORMAT_ADPCM_3BIT:
     {
-        printf("compression format not implemented\n");
-        return 1;
+        printf("Output format: ADPCM 2.6-bit\n");
+        encodedSampleData = createAdpcm3Bit(waveFile.data, noiseShaping);
+        auto decodedSampleData = decodeAdpcm3(
+            encodedSampleData.front(),
+            std::vector<uint8_t>(encodedSampleData.begin() + 1, encodedSampleData.end()));
+        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
+        break;
     }
     }
     std::vector<uint8_t> vocData = createVocFile(waveFile.sampleRate, encodedSampleData, format);
@@ -157,11 +163,12 @@ int main(int argc, char* argv[])
             "Compression formats:\n"
             "  PCM    - unsigned integer 8-bit per sample\n"
             "  ADPCM4 - ADPCM 4-bit per sample\n"
+            "  ADPCM3 - ADPCM 2.6-bit per sample (3 samples per byte)\n"
             "  ADPCM2 - ADPCM 2-bit per sample\n");
         parser.addParameter("input", "i", "Name of the input file", clp::ParameterRequired::yes);
         parser.addParameter("output", "o", "Name of the output file", clp::ParameterRequired::yes);
         parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no);
-        parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
+        parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM3, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
         parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
         parser.addParameter("shaping", "s", "Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies.", clp::ParameterRequired::no, "off");
         parser.addParameter("resampler", "r", "Resampler quality (libsamplerate). Options: best, medium, fast, linear", clp::ParameterRequired::no, "best");

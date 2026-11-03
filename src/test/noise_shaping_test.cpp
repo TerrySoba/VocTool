@@ -68,6 +68,11 @@ std::vector<uint8_t> decode2(const std::vector<uint8_t>& encoded)
     return decodeAdpcm2(encoded.front(), std::vector<uint8_t>(encoded.begin() + 1, encoded.end()));
 }
 
+std::vector<uint8_t> decode3(const std::vector<uint8_t>& encoded)
+{
+    return decodeAdpcm3(encoded.front(), std::vector<uint8_t>(encoded.begin() + 1, encoded.end()));
+}
+
 } // namespace
 
 TEST_CASE("Noise shaping parameter parsing")
@@ -164,6 +169,17 @@ TEST_CASE("Noise shaping moves noise in frequency")
 
         // measured: about 0.57 times the flat ratio
         REQUIRE(lowToHighRatio(highPass) < 0.7 * lowToHighRatio(flat));
+    }
+
+    SECTION("ADPCM3")
+    {
+        auto flat = noise(samples, decode3(createAdpcm3Bit(samples, {NoiseShapingMode::off})));
+        auto highPass = noise(samples, decode3(createAdpcm3Bit(samples, {NoiseShapingMode::fixed, 1.0})));
+        auto lowPass = noise(samples, decode3(createAdpcm3Bit(samples, {NoiseShapingMode::fixed, -0.5})));
+
+        REQUIRE(lowToHighRatio(highPass) < 0.7 * lowToHighRatio(flat));
+        REQUIRE(lowToHighRatio(lowPass) > 1.5 * lowToHighRatio(flat));
+        REQUIRE(energy(highPass) > energy(flat));
     }
 
     SECTION("dynamic")

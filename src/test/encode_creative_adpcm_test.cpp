@@ -22,6 +22,11 @@ std::vector<uint8_t> decode2(const std::vector<uint8_t>& encoded)
     return decodeAdpcm2(encoded.front(), std::vector<uint8_t>(encoded.begin() + 1, encoded.end()));
 }
 
+std::vector<uint8_t> decode3(const std::vector<uint8_t>& encoded)
+{
+    return decodeAdpcm3(encoded.front(), std::vector<uint8_t>(encoded.begin() + 1, encoded.end()));
+}
+
 uint64_t squaredError(const std::vector<uint8_t>& raw, const std::vector<uint8_t>& decoded)
 {
     REQUIRE(decoded.size() >= raw.size());
@@ -88,6 +93,32 @@ uint64_t bruteForceMinimumError2(const std::vector<uint8_t>& raw, size_t symbolC
 {
     return bruteForceMinimumCost<CreativeAdpcmDecoder2Bit>(raw, symbolCount ? symbolCount : raw.size() - 1, 2,
         [](CreativeAdpcmDecoder2Bit& decoder, uint8_t symbol) { return decoder.decode2bits(symbol); });
+}
+
+// ADPCM 2.6 stores 3 + 3 + 2 bits per byte, the 2-bit symbol is shifted left by one in the decoder.
+uint64_t bruteForceMinimumError3(const std::vector<uint8_t>& raw, size_t symbolCount = 0)
+{
+    if (symbolCount == 0) symbolCount = raw.size() - 1;
+    size_t totalBits = 0;
+    for (size_t n = 0; n < symbolCount; ++n) totalBits += (n % 3 == 2) ? 2 : 3;
+
+    uint64_t best = std::numeric_limits<uint64_t>::max();
+    std::vector<uint8_t> decoded(symbolCount + 1);
+    decoded[0] = raw[0];
+    for (uint64_t code = 0; code < (1ull << totalBits); ++code)
+    {
+        CreativeAdpcmDecoder3Bit decoder(raw[0]);
+        uint64_t remaining = code;
+        for (size_t n = 0; n < symbolCount; ++n)
+        {
+            const int bits = (n % 3 == 2) ? 2 : 3;
+            const uint8_t symbol = static_cast<uint8_t>((remaining & ((1u << bits) - 1)) << (3 - bits));
+            remaining >>= bits;
+            decoded[n + 1] = decoder.decode3bits(symbol);
+        }
+        best = std::min(best, encoderCostUnchecked(raw, decoded));
+    }
+    return best;
 }
 
 std::vector<uint8_t> testSignal(size_t length)
@@ -246,5 +277,91 @@ TEST_CASE("ADPCM2 Viterbi encoder edge cases")
     SECTION("empty input throws")
     {
         REQUIRE_THROWS(createAdpcm2BitFromRaw({}));
+    }
+}
+
+TEST_CASE("ADPCM3 decoder unpacks 3 + 3 + 2 bits per byte")
+{
+    // 0b011'011'01: +3 (scale 0 => 8), +7 (scale 8 => 16), then the 2-bit symbol 1 becomes 2 => +10
+    std::vector<uint8_t> encoded = {100, 0b01101101};
+    REQUIRE(decode3(encoded) == std::vector<uint8_t>{100, 103, 110, 120});
+}
+
+TEST_CASE("ADPCM3 Viterbi encoder finds the optimal encoding")
+{
+    std::mt19937 gen(2626);
+    std::uniform_int_distribution<int> anyValue(0, 255);
+    std::uniform_int_distribution<int> smallStep(-12, 12);
+
+    for (int run = 0; run < 20; ++run)
+    {
+        // 1 reference byte + 6 symbols (2 bytes, 16 bits) = 65536 combinations for brute force
+        std::vector<uint8_t> raw(7);
+        raw[0] = anyValue(gen);
+        for (size_t i = 1; i < raw.size(); ++i)
+        {
+            raw[i] = (run % 2) ? anyValue(gen) : std::clamp(raw[i - 1] + smallStep(gen), 0, 255);
+        }
+
+        auto encoded = createAdpcm3BitFromRaw(raw);
+        REQUIRE(encoded.size() == 3);
+        REQUIRE(squaredError(raw, decode3(encoded)) == bruteForceMinimumError3(raw));
+    }
+}
+
+TEST_CASE("ADPCM3 Viterbi encoder handles long input")
+{
+    std::vector<uint8_t> raw = testSignal(5002);
+
+    auto encoded = createAdpcm3BitFromRaw(raw);
+    REQUIRE(encoded.size() == 1 + (raw.size() - 1) / 3);
+
+    auto decoded = decode3(encoded);
+    REQUIRE(decoded.size() == raw.size());
+
+    // must be between ADPCM4 and ADPCM2
+    const double meanSquaredError = (double)squaredError(raw, decoded) / raw.size();
+    const double meanSquaredError2 = (double)squaredError(raw, decode2(createAdpcm2BitFromRaw(raw))) / raw.size();
+    const double meanSquaredError4 = (double)squaredError(raw, decode(createAdpcm4BitFromRaw(raw))) / raw.size();
+    REQUIRE(meanSquaredError < meanSquaredError2);
+    REQUIRE(meanSquaredError > meanSquaredError4);
+
+    REQUIRE(createAdpcm3BitFromRaw(raw) == encoded);
+}
+
+TEST_CASE("ADPCM3 Viterbi encoder edge cases")
+{
+    SECTION("single sample")
+    {
+        std::vector<uint8_t> raw = {77};
+        REQUIRE(createAdpcm3BitFromRaw(raw) == std::vector<uint8_t>{77});
+    }
+
+    SECTION("incomplete last byte keeps all samples")
+    {
+        for (size_t symbols : {4, 5})
+        {
+            const std::vector<uint8_t> samples = {128, 131, 137, 146, 158, 170};
+            const std::vector<uint8_t> raw(samples.begin(), samples.begin() + symbols + 1);
+            auto encoded = createAdpcm3BitFromRaw(raw);
+            REQUIRE(encoded.size() == 3);
+            auto decoded = decode3(encoded);
+            REQUIRE(decoded.size() == 7);
+            REQUIRE(encoderCost(raw, decoded) == bruteForceMinimumError3(raw, 6));
+        }
+    }
+
+    SECTION("padding holds the last value, so there is no click at the end")
+    {
+        std::vector<uint8_t> raw = testSignal(1000);
+        raw.insert(raw.end(), 100, 128);  // sound ends in silence, 1099 symbols => 2 padding samples
+        auto decoded = decode3(createAdpcm3BitFromRaw(raw));
+        REQUIRE(decoded.size() == raw.size() + 2);
+        REQUIRE(std::all_of(decoded.end() - 3, decoded.end(), [](uint8_t v) { return v == 128; }));
+    }
+
+    SECTION("empty input throws")
+    {
+        REQUIRE_THROWS(createAdpcm3BitFromRaw({}));
     }
 }

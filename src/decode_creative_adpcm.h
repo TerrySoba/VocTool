@@ -55,12 +55,22 @@ private:
 
 
 
+/**
+ * Splits bytes into symbols, most significant bits first.
+ *
+ * bitsPerNibble == 3 is the ADPCM 2.6 layout: 3 + 3 + 2 bits per byte. The last 2-bit symbol is
+ * shifted left by one, so all symbols are in the 3-bit range (the last one is always even).
+ */
 std::vector<uint8_t> breakBytes(const std::span<uint8_t>& data, uint8_t bitsPerNibble)
 {
     size_t nibbleCount = 0;
     if (bitsPerNibble == 4)
     {
         nibbleCount = data.size() * 2;
+    }
+    else if (bitsPerNibble == 3)
+    {
+        nibbleCount = data.size() * 3;
     }
     else if (bitsPerNibble == 2)
     {
@@ -80,6 +90,12 @@ std::vector<uint8_t> breakBytes(const std::span<uint8_t>& data, uint8_t bitsPerN
         {
             nibbles.push_back(byte >> 4);
             nibbles.push_back(byte & 0x0F);
+        }
+        else if (bitsPerNibble == 3)
+        {
+            nibbles.push_back((byte >> 5) & 0x07);
+            nibbles.push_back((byte >> 2) & 0x07);
+            nibbles.push_back((byte & 0x03) << 1);
         }
         else if (bitsPerNibble == 2)
         {
@@ -172,6 +188,77 @@ std::vector<uint8_t> decodeAdpcm2(uint8_t initial, std::vector<uint8_t> data)
     for (size_t i = 0; i < nibbles.size(); ++i)
     {
         decoded[i + 1] = decoder.decode2bits(nibbles[i]);
+    }
+
+    return decoded;
+}
+
+
+/**
+ * This class is a decoder for 2.6bit Creative ADPCM ("3-bit" ADPCM, three samples per byte).
+ *
+ * Imported from https://github.com/joncampbell123/dosbox-x/blob/master/src/hardware/sblaster.cpp
+ */
+class CreativeAdpcmDecoder3Bit
+{
+public:
+    CreativeAdpcmDecoder3Bit(uint8_t firstValue) :
+        m_scale(0),
+        m_previous(firstValue)
+    {}
+
+    /**
+     * Decode 3 bits of data and return the 8bit data.
+     *
+     * @param sample The 3 bits to be decoded. Value must be smaller than 8.
+     *               The third sample of each byte only has 2 bits, it has to be shifted left by one.
+     */
+    uint8_t decode3bits(uint8_t sample)
+    {
+        static const int8_t scaleMap[40] = {
+            0,  1,  2,  3,  0,  -1,  -2,  -3,
+            1,  3,  5,  7, -1,  -3,  -5,  -7,
+            2,  6, 10, 14, -2,  -6, -10, -14,
+            4, 12, 20, 28, -4, -12, -20, -28,
+            5, 15, 25, 35, -5, -15, -25, -35};
+        static const uint8_t adjustMap[40] = {
+              0, 0, 0, 8,   0, 0, 0, 8,
+            248, 0, 0, 8, 248, 0, 0, 8,
+            248, 0, 0, 8, 248, 0, 0, 8,
+            248, 0, 0, 8, 248, 0, 0, 8,
+            248, 0, 0, 0, 248, 0, 0, 0};
+
+        int32_t samp = sample + m_scale;
+        if (samp < 0)
+            samp = 0;
+        if (samp > 39)
+            samp = 39;
+
+        int32_t ref = m_previous + scaleMap[samp];
+        m_previous = static_cast<uint8_t>(std::clamp(ref, 0, 255));
+        m_scale = (m_scale + adjustMap[samp]) & 0xff;
+
+        return m_previous;
+    }
+
+private:
+    uint32_t m_scale;
+    uint8_t m_previous;
+};
+
+
+std::vector<uint8_t> decodeAdpcm3(uint8_t initial, std::vector<uint8_t> data)
+{
+    auto nibbles = breakBytes(data, 3);
+
+    CreativeAdpcmDecoder3Bit decoder(initial);
+
+    std::vector<uint8_t> decoded(nibbles.size() + 1);
+    decoded[0] = initial;
+
+    for (size_t i = 0; i < nibbles.size(); ++i)
+    {
+        decoded[i + 1] = decoder.decode3bits(nibbles[i]);
     }
 
     return decoded;

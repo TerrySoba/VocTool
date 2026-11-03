@@ -1,7 +1,7 @@
 = VocTool
 
 This project provides a tool to convert WAVE file into 8bit Creative VOC files, including ADPCM compression.
-Currently 2bit and 4bit ADPCM are supported.
+Currently 2bit, 2.6bit and 4bit ADPCM are supported.
 
 The resulting VOC file is always in mono.
 
@@ -20,6 +20,7 @@ to the given frequency. Otherwise the sample frequency of the WAVE file is kept.
 Compression formats:
   PCM    - unsigned integer 8-bit per sample
   ADPCM4 - ADPCM 4-bit per sample
+  ADPCM3 - ADPCM 2.6-bit per sample (3 samples per byte)
   ADPCM2 - ADPCM 2-bit per sample
 
 
@@ -27,7 +28,7 @@ options:
   -i, --input        Name of the input file
   -o, --output       Name of the output file
   -f, --frequency    Frequency of output file in hertz
-  -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
+  -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM3, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9
   -s, --shaping      Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies. ( default: off )
   -r, --resampler    Resampler quality (libsamplerate). Options: best, medium, fast, linear ( default: best )
@@ -48,10 +49,10 @@ voctool -i sound.voc -o sound.wav
 
 == How the ADPCM encoders work
 
-Both ADPCM formats are always encoded optimally, so there is no quality setting.
+All ADPCM formats are always encoded optimally, so there is no quality setting.
 The complete state of the Creative ADPCM decoders is very small: the previous output value (0..255)
-plus a step size, which has 4 possible values for ADPCM4 and 6 for ADPCM2.
-This gives only 1024 (ADPCM4) or 1536 (ADPCM2) possible decoder states.
+plus a step size, which has 4 possible values for ADPCM4, 5 for ADPCM3 and 6 for ADPCM2.
+This gives only 1024 (ADPCM4), 1280 (ADPCM3) or 1536 (ADPCM2) possible decoder states.
 The encoder uses the Viterbi algorithm over these states to find the sequence of codes whose decoded output
 has the smallest possible squared error compared to the input.
 
@@ -78,8 +79,9 @@ voctool -i sound.wav -f 11025 -c ADPCM4 -s dynamic -o sound.voc
 
 == About Creative ADPCM
 
-Creative ADPCM compresses an 8bit per sample sound file into a 4bit/2bit per sample sound file.
-This halves/quaters the required space, but also decreases the sound quality.
+Creative ADPCM compresses an 8bit per sample sound file into a 4bit/2.6bit/2bit per sample sound file.
+This halves/thirds/quaters the required space, but also decreases the sound quality.
+The 2.6bit format (called ADPCM3 here, VOC codec 2) stores three samples per byte using 3 + 3 + 2 bits.
 This works by only storing the difference to the previous sample.
 
 == About this encoder

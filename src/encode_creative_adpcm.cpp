@@ -14,11 +14,15 @@
  * error between input and decoded output) with the Viterbi algorithm over all decoder states.
  *
  * Each codec description below provides:
- *   kStateCount   number of decoder states
- *   kSymbolBits   bits per encoded symbol
- *   initialState  decoder state after the reference byte
- *   previousValue last decoded output value of a state
- *   step          decoder transition for (state, symbol), must match decode_creative_adpcm.h
+ *   kStateCount     number of decoder states
+ *   kSymbolBits     bits of a decoder symbol
+ *   kSymbolsPerByte number of symbols packed into one byte
+ *   storedBits      bits actually stored for the symbol at a position in the byte. If this is less
+ *                   than kSymbolBits, the stored bits are the upper bits of the decoder symbol and
+ *                   the lower bits are always zero (the decoder shifts them in).
+ *   initialState    decoder state after the reference byte
+ *   previousValue   last decoded output value of a state
+ *   step            decoder transition for (state, symbol), must match decode_creative_adpcm.h
  */
 
 namespace {
@@ -31,6 +35,12 @@ struct Adpcm4Codec
 {
     static constexpr int kStateCount = 256 * 4;
     static constexpr int kSymbolBits = 4;
+    static constexpr int kSymbolsPerByte = 2;
+
+    static constexpr int storedBits(int /*positionInByte*/)
+    {
+        return 4;
+    }
 
     static int initialState(uint8_t first)
     {
@@ -69,6 +79,12 @@ struct Adpcm2Codec
     static constexpr int kScaleCount = 6;
     static constexpr int kStateCount = 256 * kScaleCount;
     static constexpr int kSymbolBits = 2;
+    static constexpr int kSymbolsPerByte = 4;
+
+    static constexpr int storedBits(int /*positionInByte*/)
+    {
+        return 2;
+    }
 
     static int initialState(uint8_t first)
     {
@@ -103,6 +119,64 @@ struct Adpcm2Codec
         }
 
         nextState = value * kScaleCount + newScale / 4;
+    }
+};
+
+/**
+ * 2.6-bit ADPCM, see CreativeAdpcmDecoder3Bit.
+ * A byte holds three symbols: 3 bits, 3 bits and 2 bits. The decoder shifts the last one left
+ * by one bit, so it can only be an even 3-bit symbol.
+ * The scale is always one of 0, 8, 16, 24, 32.
+ * State: previousValue * 5 + scale / 8
+ */
+struct Adpcm3Codec
+{
+    static constexpr int kScaleCount = 5;
+    static constexpr int kStateCount = 256 * kScaleCount;
+    static constexpr int kSymbolBits = 3;
+    static constexpr int kSymbolsPerByte = 3;
+
+    static constexpr int storedBits(int positionInByte)
+    {
+        return (positionInByte == 2) ? 2 : 3;
+    }
+
+    static int initialState(uint8_t first)
+    {
+        return first * kScaleCount;  // scale starts at 0
+    }
+
+    static int previousValue(int state)
+    {
+        return state / kScaleCount;
+    }
+
+    static void step(int state, int symbol, int& nextState, int& value)
+    {
+        static const int8_t scaleMap[40] = {
+            0,  1,  2,  3,  0,  -1,  -2,  -3,
+            1,  3,  5,  7, -1,  -3,  -5,  -7,
+            2,  6, 10, 14, -2,  -6, -10, -14,
+            4, 12, 20, 28, -4, -12, -20, -28,
+            5, 15, 25, 35, -5, -15, -25, -35};
+        static const int8_t adjustMap[40] = {
+             0, 0, 0, 8,  0, 0, 0, 8,
+            -8, 0, 0, 8, -8, 0, 0, 8,
+            -8, 0, 0, 8, -8, 0, 0, 8,
+            -8, 0, 0, 8, -8, 0, 0, 8,
+            -8, 0, 0, 0, -8, 0, 0, 0};
+
+        const int previous = state / kScaleCount;
+        const int scale = (state % kScaleCount) * 8;
+        const int index = std::clamp(symbol + scale, 0, 39);
+        value = std::clamp(previous + scaleMap[index], 0, 255);
+        const int newScale = scale + adjustMap[index];
+        if (newScale < 0 || newScale > 8 * (kScaleCount - 1))
+        {
+            throw std::logic_error("ADPCM3 scale out of range");
+        }
+
+        nextState = value * kScaleCount + newScale / 8;
     }
 };
 
@@ -170,7 +244,7 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
     constexpr int kStateCount = Codec::kStateCount;
     constexpr int kSymbolBits = Codec::kSymbolBits;
     constexpr int kSymbolCount = 1 << kSymbolBits;
-    constexpr int kSymbolsPerByte = 8 / kSymbolBits;
+    constexpr int kSymbolsPerByte = Codec::kSymbolsPerByte;
     static_assert(kStateCount << kSymbolBits <= std::numeric_limits<uint16_t>::max() + 1, "back pointer does not fit into 16 bit");
 
     if (!shapingWeights.empty() && shapingWeights.size() != targets.size())
@@ -261,6 +335,8 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
             const bool isPadding = position >= sampleCount;
             const int32_t sample = isPadding ? 0 : targets[position];
             const int64_t weight = (isPadding || shapingWeights.empty()) ? 0 : shapingWeights[position];
+            // symbols with fewer stored bits must have their lower bits zero
+            const int symbolIncrement = 1 << (kSymbolBits - Codec::storedBits(static_cast<int>(position % kSymbolsPerByte)));
 
             std::fill(nextCost.begin(), nextCost.end(), kInfinity);
             uint16_t* stepBackPointers = &backPointers[windowFill * kStateCount];
@@ -294,7 +370,7 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
                 }
 
                 const int base = state * kSymbolCount;
-                for (int symbol = 0; symbol < kSymbolCount; ++symbol)
+                for (int symbol = 0; symbol < kSymbolCount; symbol += symbolIncrement)
                 {
                     const int next = transitions.nextState[base + symbol];
                     const int32_t decoded = toSigned16(transitions.value[base + symbol]);
@@ -332,7 +408,8 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
         uint8_t byte = 0;
         for (int i = 0; i < kSymbolsPerByte; ++i)
         {
-            byte = static_cast<uint8_t>((byte << kSymbolBits) | symbols[n + i]);
+            const int bits = Codec::storedBits(i);
+            byte = static_cast<uint8_t>((byte << bits) | (symbols[n + i] >> (kSymbolBits - bits)));
         }
         binaryResult.push_back(byte);
     }
@@ -393,6 +470,11 @@ std::vector<uint8_t> createAdpcm2BitFromRaw(const std::vector<uint8_t>& raw)
     return encodeRaw<Adpcm2Codec>(raw);
 }
 
+std::vector<uint8_t> createAdpcm3BitFromRaw(const std::vector<uint8_t>& raw)
+{
+    return encodeRaw<Adpcm3Codec>(raw);
+}
+
 std::vector<uint8_t> createAdpcm4Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
 {
     return encodeSamples<Adpcm4Codec>(samples, shaping);
@@ -401,4 +483,9 @@ std::vector<uint8_t> createAdpcm4Bit(const std::vector<double>& samples, const N
 std::vector<uint8_t> createAdpcm2Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
 {
     return encodeSamples<Adpcm2Codec>(samples, shaping);
+}
+
+std::vector<uint8_t> createAdpcm3Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
+{
+    return encodeSamples<Adpcm3Codec>(samples, shaping);
 }

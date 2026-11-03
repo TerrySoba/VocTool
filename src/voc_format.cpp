@@ -160,6 +160,14 @@ VocFile decodeToPcm(const VocFile& compressed)
             result.sampleFormat = VocSampleFormat::VOC_FORMAT_PCM_8BIT;
             break;
         }
+        case VocSampleFormat::VOC_FORMAT_ADPCM_3BIT:
+        {
+            uint8_t initial = result.sampleData[0];
+            result.sampleData.erase(result.sampleData.begin());
+            result.sampleData = decodeAdpcm3(initial, result.sampleData);
+            result.sampleFormat = VocSampleFormat::VOC_FORMAT_PCM_8BIT;
+            break;
+        }
         case VocSampleFormat::VOC_FORMAT_ADPCM_4BIT:
         {
             uint8_t initial = result.sampleData[0];
