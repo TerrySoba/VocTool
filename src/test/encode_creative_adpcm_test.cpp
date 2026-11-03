@@ -3,6 +3,7 @@
 #include "encode_creative_adpcm.h"
 #include "decode_creative_adpcm.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <random>
@@ -33,42 +34,60 @@ uint64_t squaredError(const std::vector<uint8_t>& raw, const std::vector<uint8_t
     return sum;
 }
 
-// Tries every possible nibble sequence using the real decoder.
-uint64_t bruteForceMinimumError(const std::vector<uint8_t>& raw)
+// The cost the encoder minimizes: squared error of all real samples plus, for the padding samples
+// that fill up the last byte, the squared jump from the previous decoded value.
+uint64_t encoderCostUnchecked(const std::vector<uint8_t>& raw, const std::vector<uint8_t>& decoded)
 {
-    const size_t nibbleCount = raw.size() - 1;
-    uint64_t best = std::numeric_limits<uint64_t>::max();
-    for (uint64_t code = 0; code < (1ull << (4 * nibbleCount)); ++code)
+    uint64_t sum = 0;
+    for (size_t i = 0; i < raw.size(); ++i)
     {
-        CreativeAdpcmDecoder4Bit decoder(raw[0]);
-        uint64_t sum = 0;
-        for (size_t n = 0; n < nibbleCount; ++n)
+        int64_t diff = (int64_t)raw[i] - (int64_t)decoded[i];
+        sum += diff * diff;
+    }
+    for (size_t i = raw.size(); i < decoded.size(); ++i)
+    {
+        int64_t jump = (int64_t)decoded[i] - (int64_t)decoded[i - 1];
+        sum += jump * jump;
+    }
+    return sum;
+}
+
+uint64_t encoderCost(const std::vector<uint8_t>& raw, const std::vector<uint8_t>& decoded)
+{
+    REQUIRE(decoded.size() >= raw.size());
+    return encoderCostUnchecked(raw, decoded);
+}
+
+// Tries every possible code sequence using the real decoder and returns the minimum encoderCost().
+// symbolCount may be larger than raw.size() - 1 to include padding.
+template <typename Decoder, typename DecodeFunction>
+uint64_t bruteForceMinimumCost(const std::vector<uint8_t>& raw, size_t symbolCount, int symbolBits, DecodeFunction decodeSymbol)
+{
+    uint64_t best = std::numeric_limits<uint64_t>::max();
+    std::vector<uint8_t> decoded(symbolCount + 1);
+    decoded[0] = raw[0];
+    for (uint64_t code = 0; code < (1ull << (symbolBits * symbolCount)); ++code)
+    {
+        Decoder decoder(raw[0]);
+        for (size_t n = 0; n < symbolCount; ++n)
         {
-            int64_t diff = (int64_t)decoder.decodeNibble((code >> (4 * n)) & 0xf) - (int64_t)raw[n + 1];
-            sum += diff * diff;
+            decoded[n + 1] = decodeSymbol(decoder, (code >> (symbolBits * n)) & ((1u << symbolBits) - 1));
         }
-        best = std::min(best, sum);
+        best = std::min(best, encoderCostUnchecked(raw, decoded));
     }
     return best;
 }
 
-// Tries every possible 2-bit code sequence using the real decoder.
-uint64_t bruteForceMinimumError2(const std::vector<uint8_t>& raw)
+uint64_t bruteForceMinimumError(const std::vector<uint8_t>& raw, size_t symbolCount = 0)
 {
-    const size_t symbolCount = raw.size() - 1;
-    uint64_t best = std::numeric_limits<uint64_t>::max();
-    for (uint64_t code = 0; code < (1ull << (2 * symbolCount)); ++code)
-    {
-        CreativeAdpcmDecoder2Bit decoder(raw[0]);
-        uint64_t sum = 0;
-        for (size_t n = 0; n < symbolCount; ++n)
-        {
-            int64_t diff = (int64_t)decoder.decode2bits((code >> (2 * n)) & 0x3) - (int64_t)raw[n + 1];
-            sum += diff * diff;
-        }
-        best = std::min(best, sum);
-    }
-    return best;
+    return bruteForceMinimumCost<CreativeAdpcmDecoder4Bit>(raw, symbolCount ? symbolCount : raw.size() - 1, 4,
+        [](CreativeAdpcmDecoder4Bit& decoder, uint8_t symbol) { return decoder.decodeNibble(symbol); });
+}
+
+uint64_t bruteForceMinimumError2(const std::vector<uint8_t>& raw, size_t symbolCount = 0)
+{
+    return bruteForceMinimumCost<CreativeAdpcmDecoder2Bit>(raw, symbolCount ? symbolCount : raw.size() - 1, 2,
+        [](CreativeAdpcmDecoder2Bit& decoder, uint8_t symbol) { return decoder.decode2bits(symbol); });
 }
 
 std::vector<uint8_t> testSignal(size_t length)
@@ -140,7 +159,16 @@ TEST_CASE("ADPCM4 Viterbi encoder edge cases")
         REQUIRE(encoded.size() == 3);
         auto decoded = decode(encoded);
         REQUIRE(decoded.size() == 5);
-        REQUIRE(squaredError(raw, decoded) == bruteForceMinimumError(raw));
+        REQUIRE(encoderCost(raw, decoded) == bruteForceMinimumError(raw, 4));
+    }
+
+    SECTION("padding holds the last value, so there is no click at the end")
+    {
+        std::vector<uint8_t> raw = testSignal(1000);
+        raw.insert(raw.end(), 100, 128);  // sound ends in silence, 1099 nibbles => 1 padding sample
+        auto decoded = decode(createAdpcm4BitFromRaw(raw));
+        REQUIRE(decoded.size() == raw.size() + 1);
+        REQUIRE(decoded.back() == 128);
     }
 
     SECTION("empty input throws")
@@ -203,7 +231,16 @@ TEST_CASE("ADPCM2 Viterbi encoder edge cases")
         REQUIRE(encoded.size() == 3);
         auto decoded = decode2(encoded);
         REQUIRE(decoded.size() == 9);
-        REQUIRE(squaredError(raw, decoded) == bruteForceMinimumError2(raw));
+        REQUIRE(encoderCost(raw, decoded) == bruteForceMinimumError2(raw, 8));
+    }
+
+    SECTION("padding holds the last value, so there is no click at the end")
+    {
+        std::vector<uint8_t> raw = testSignal(1002);
+        raw.insert(raw.end(), 100, 128);  // sound ends in silence, 1101 symbols => 3 padding samples
+        auto decoded = decode2(createAdpcm2BitFromRaw(raw));
+        REQUIRE(decoded.size() == raw.size() + 3);
+        REQUIRE(std::all_of(decoded.end() - 4, decoded.end(), [](uint8_t v) { return v == 128; }));
     }
 
     SECTION("empty input throws")

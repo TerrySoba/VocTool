@@ -17,6 +17,7 @@
  *   kStateCount   number of decoder states
  *   kSymbolBits   bits per encoded symbol
  *   initialState  decoder state after the reference byte
+ *   previousValue last decoded output value of a state
  *   step          decoder transition for (state, symbol), must match decode_creative_adpcm.h
  */
 
@@ -34,6 +35,11 @@ struct Adpcm4Codec
     static int initialState(uint8_t first)
     {
         return first * 4;  // accumulator starts at 1
+    }
+
+    static int previousValue(int state)
+    {
+        return state >> 2;
     }
 
     static void step(int state, int symbol, int& nextState, int& value)
@@ -67,6 +73,11 @@ struct Adpcm2Codec
     static int initialState(uint8_t first)
     {
         return first * kScaleCount;  // scale starts at 0
+    }
+
+    static int previousValue(int state)
+    {
+        return state / kScaleCount;
     }
 
     static void step(int state, int symbol, int& nextState, int& value)
@@ -167,8 +178,9 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
         throw std::logic_error("Number of shaping weights does not match number of samples");
     }
 
-    // Pad to full bytes, so no sample is lost. Padding samples do not contribute to the error,
-    // so they cannot degrade the encoding of the real samples.
+    // Pad to full bytes, so no sample is lost. The padding samples are played back by the decoder too,
+    // so they should hold the last value: their cost is the jump from the previous decoded value.
+    // Otherwise a random padding code could produce an audible click at the end.
     const size_t sampleCount = targets.size();
     const size_t paddedCount = (sampleCount + kSymbolsPerByte - 1) / kSymbolsPerByte * kSymbolsPerByte;
 
@@ -286,7 +298,9 @@ std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>
                 {
                     const int next = transitions.nextState[base + symbol];
                     const int32_t decoded = toSigned16(transitions.value[base + symbol]);
-                    const int64_t difference = isPadding ? 0 : static_cast<int64_t>(decoded) - target;
+                    const int64_t difference = isPadding
+                        ? static_cast<int64_t>(decoded) - toSigned16(Codec::previousValue(state))
+                        : static_cast<int64_t>(decoded) - target;
                     const uint64_t newCost = stateCost + static_cast<uint64_t>(difference * difference);
                     if (newCost < nextCost[next])
                     {
