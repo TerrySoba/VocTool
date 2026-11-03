@@ -10,7 +10,7 @@ The resulting VOC file is always in mono.
 [source]
 .Usage of voctool
 ----
-Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] [ -r RESAMPLER ] [ -a ALGORITHM ] 
+Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] [ -r RESAMPLER ] 
 
 Program to convert WAVE files into VOC files including optional ADPCM compression.
 Conversion from VOC to WAVE is also supported.
@@ -29,9 +29,8 @@ options:
   -f, --frequency    Frequency of output file in hertz
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9
-  -l, --level        Level of compression. Must be integer. 1 = lowest quality but fast. Bigger values than 5 probably make no sense and are terribly slow. ( default: 4 )
+  -l, --level        Level of ADPCM2 compression. Must be integer. 1 = lowest quality but fast. Each step multiplies the runtime by 4. Not used for ADPCM4, which is always encoded optimally. ( default: 4 )
   -r, --resampler    Resampler quality (libsamplerate). Options: best, medium, fast, linear ( default: best )
-  -a, --algorithm    ADPCM encoder to be used, options are: combined (default) and trellis ( default: combined )
 ----
 
 == Examples
@@ -47,14 +46,18 @@ voctool -i sound.wav -f 8000 -c ADPCM4 -o sound.voc -n 0.7
 voctool -i sound.voc -o sound.wav
 ----
 
-== Choosing the right ADPCM compression level
+== How the ADPCM encoders work
 
-The tool supports the option to set the compression level. The compression level is a number between 1 and 8.
-The level defines the number of samples that are combined during compression. If a number of 4 is chosen that means that the algorithm will exhastively try every combination of 4 samples to find the best compression. For ADPCM4 this means that incremeting the level by 1 will increase the runtime by a factor of 16. For ADPCM2 the factor is 4.
+*ADPCM4* is always encoded optimally, so there is no quality setting.
+The complete state of the 4-bit decoder is just the previous output value (0..255) and the step size (1, 2, 4 or 8),
+which gives only 1024 possible states. The encoder uses the Viterbi algorithm over these states to find the
+nibble sequence whose decoded output has the smallest possible squared error compared to the input.
+The `--level` option is ignored for ADPCM4.
 
-For *ADPCM4* the *level 4* seems to be a good compromise between quality and speed. 
-
-For *ADPCM2* the *level 7* seems to be a good compromise.
+*ADPCM2* uses an exhaustive search over blocks of samples. The level defines the number of samples that are combined.
+If a level of 4 is chosen, the encoder tries every combination of 4 samples to find the best compression.
+Incrementing the level by 1 increases the runtime by a factor of 4. A *level of 7* seems to be a good compromise
+between quality and speed.
 
 == About Creative ADPCM
 

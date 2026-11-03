@@ -2,19 +2,6 @@ cmake_minimum_required(VERSION 3.20)
 project(voctool)
 set(CMAKE_CXX_STANDARD 20)
 
-set(USE_X86_SIMD false)
-set(USE_ARM_SIMD false)
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86|i[3-6]86|AMD64")
-    message(STATUS "Building for x86/x86_64")
-    set(USE_X86_SIMD true)
-elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm")
-    message(STATUS "Building for ARM/ARM64")
-    set(USE_ARM_SIMD true)
-else()
-    message(FATAL_ERROR "Unsupported architecture: " ${CMAKE_SYSTEM_PROCESSOR})
-endif()
-
 find_package(Catch2 REQUIRED)
 if(Catch2_VERSION VERSION_GREATER_EQUAL 3.0)
     set(CATCH2_INCLUDE_FILE "catch2/catch_test_macros.hpp")
@@ -23,22 +10,12 @@ else()
 endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/test/catch_importer.h.in ${CMAKE_BINARY_DIR}/catch_importer.h)
 
-find_package(OpenMP REQUIRED)
-
 # libsamplerate: prefer its CMake package config, fall back to pkg-config
 find_package(SampleRate CONFIG QUIET)
 if(NOT TARGET SampleRate::samplerate)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
     add_library(SampleRate::samplerate ALIAS PkgConfig::SAMPLERATE)
-endif()
-
-if (USE_X86_SIMD)
-    add_library(vectorclass INTERFACE)
-
-    target_include_directories(vectorclass INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/vectorclass
-    )
 endif()
 
 add_library(${PROJECT_NAME}_lib STATIC
@@ -52,23 +29,7 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/compare_audio.cpp
 )
 
-if (USE_ARM_SIMD)
-    target_sources(${PROJECT_NAME}_lib PRIVATE
-        src/encode_creative_adpcm_neon.cpp
-    )
-endif()
-
-if (USE_X86_SIMD)
-    target_sources(${PROJECT_NAME}_lib PRIVATE
-        src/encode_creative_adpcm_simd.cpp
-    )
-    target_link_libraries(${PROJECT_NAME}_lib
-        PUBLIC vectorclass
-    )
-endif()
-
 target_link_libraries(${PROJECT_NAME}_lib
-    PUBLIC OpenMP::OpenMP_CXX
     PRIVATE SampleRate::samplerate)
 
 add_executable(${PROJECT_NAME}
@@ -83,6 +44,7 @@ add_executable(${PROJECT_NAME}_test
     src/test/resampling_test.cpp
     src/test/detect_file_format_test.cpp
     src/test/voc_format_test.cpp
+    src/test/encode_creative_adpcm_test.cpp
     )
 
 target_include_directories(${PROJECT_NAME}_test PRIVATE 
@@ -94,7 +56,6 @@ target_link_libraries(${PROJECT_NAME}_test
     Catch2::Catch2WithMain)
 
 target_include_directories(${PROJECT_NAME}_test PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 

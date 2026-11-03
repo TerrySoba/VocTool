@@ -1,19 +1,13 @@
 #include "encode_creative_adpcm.h"
 #include "decode_creative_adpcm.h"
 
-#include "omp.h"
-
-#include <limits>
-#include <cassert>
-#include <memory>
-#include <iostream>
-#include <random>
 #include <algorithm>
+#include <array>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
 
-uint64_t getNthNibble(int n, uint64_t value)
-{
-    return (0xf & (value >> (4 * n)));
-}
+namespace {
 
 uint64_t getNth2bit(int n, uint64_t value)
 {
@@ -31,329 +25,203 @@ constexpr uint64_t constPow(uint64_t val, uint64_t exp)
     return res;
 }
 
+/*
+ * The complete state of the Creative 4-bit ADPCM decoder is the previous output value (0..255)
+ * and the accumulator (1, 2, 4 or 8). This gives only 1024 possible states, which makes it
+ * possible to find the optimal encoding (minimum squared error) with the Viterbi algorithm.
+ *
+ * State index: previousValue * 4 + log2(accumulator)
+ */
+constexpr int kStateCount = 256 * 4;
+constexpr int kNibbleCount = 16;
 
-struct Best
+/** Transition table: next state and decoded output value for every (state, nibble) pair. */
+struct Adpcm4Transitions
 {
-    uint64_t bestIndex = 0;
-    uint64_t bestDiff = std::numeric_limits<uint64_t>::max();
-    CreativeAdpcmDecoder4Bit bestDecoder = CreativeAdpcmDecoder4Bit(0);
+    std::array<uint16_t, kStateCount * kNibbleCount> nextState;
+    std::array<uint8_t, kStateCount * kNibbleCount> value;
+
+    Adpcm4Transitions()
+    {
+        for (int state = 0; state < kStateCount; ++state)
+        {
+            const int previous = state >> 2;
+            const int accumulator = 1 << (state & 3);
+            for (int nibble = 0; nibble < kNibbleCount; ++nibble)
+            {
+                // must match CreativeAdpcmDecoder4Bit::decodeNibble()
+                const int data = nibble & 7;
+                const int sign = (nibble & 8) ? 1 : -1;
+                const int decoded = std::clamp(previous + sign * (data * accumulator + accumulator / 2), 0, 255);
+                int newAccumulator = accumulator;
+                if (data == 0 && newAccumulator > 1) newAccumulator /= 2;
+                if (data >= 5 && newAccumulator < 8) newAccumulator *= 2;
+                const int log2Accumulator = (newAccumulator == 1) ? 0 : (newAccumulator == 2) ? 1 : (newAccumulator == 4) ? 2 : 3;
+
+                nextState[state * kNibbleCount + nibble] = static_cast<uint16_t>(decoded * 4 + log2Accumulator);
+                value[state * kNibbleCount + nibble] = static_cast<uint8_t>(decoded);
+            }
+        }
+    }
 };
 
-/**
- * Encodes the given sequence of unsigned 8bit values to 4bit ADPCM.
- * The first 8bit value is stored "as is", but the following values are
- * compressed to 4bit values. This almost halves the size.
- * 
- * The encoder uses an ADPCM decoder and tries every possible input
- * until it gets the output that most closely matches the input value.
- * The parameter combinedNibbles controlls the number of nibbles
- * that are combined. Each additional nibble muliplies the runtime
- * by 16. A value between 3 and 5 produces good results.
- * Increasing the number further does not add much quality improvements,
- * but drastically increases the runtime, so 5 is the default.
- */
-std::vector<uint8_t> createAdpcm4BitFromRawOpenMP(const std::vector<uint8_t>& raw, uint64_t combinedNibbles)
+const Adpcm4Transitions& adpcm4Transitions()
 {
-    uint64_t squaredSum = 0u;
-
-    CreativeAdpcmDecoder4Bit decoder(raw[0]);
-    
-    std::vector<uint64_t> result(raw.size() / combinedNibbles);
-
-    for (size_t i = 1; i < raw.size() / combinedNibbles; ++i)
-    {
-        std::vector<Best> bestResults(omp_get_max_threads());
-
-        // try every possible input for the decoder
-        #pragma omp parallel for
-        for (int64_t n = 0; n < static_cast<int64_t>(constPow(16, combinedNibbles)); ++n)
-        {
-            CreativeAdpcmDecoder4Bit decoderCopy = decoder;
-            uint64_t diffSum = 0;
-            for (size_t nib = 0; nib < combinedNibbles; ++nib)
-            {
-                int32_t diff = (int32_t)decoderCopy.decodeNibble(getNthNibble(nib, n)) - (int32_t)raw[i*combinedNibbles + nib - combinedNibbles + 1];
-                diffSum += diff * diff;
-            }
- 
-            auto& best = bestResults.at(omp_get_thread_num());
-
-            if (diffSum < best.bestDiff)
-            {
-                best.bestDiff = diffSum;
-                best.bestIndex = n;
-                best.bestDecoder = decoderCopy;
-            }
-        }
-
-        // now merge results from threads
-        uint64_t bestIndex = 0;
-        uint64_t bestDiff = std::numeric_limits<uint64_t>::max();
-        CreativeAdpcmDecoder4Bit bestDecoder(0);
-        for (auto& best : bestResults)
-        {
-            // printf("diff: %d\n", best.bestDiff);
-            if (best.bestDiff < bestDiff)
-            {
-                bestDiff = best.bestDiff;
-                bestIndex = best.bestIndex;
-                bestDecoder = best.bestDecoder;
-            }
-        }
-
-
-        decoder = bestDecoder; 
-        result[i-1] = bestIndex;
-        squaredSum += bestDiff;
-
-
-        // if (i % 10 == 0) printf("%d\n", i);
-    }
-
-    // printf("sum: %ld\n", squaredSum);
-
-    std::vector<uint8_t> nibbles(result.size() * combinedNibbles);
-    for (size_t i = 0; i < result.size(); ++i)
-    {
-        for (size_t nib = 0; nib < combinedNibbles; ++nib)
-        {
-            nibbles[i * combinedNibbles + nib] = getNthNibble(nib, result[i]);
-        }
-    }
-
-    std::vector<uint8_t> binaryResult(nibbles.size() / 2);
-
-    // merge nibbles into bytes
-    for (size_t n = 0; n < nibbles.size() / 2; ++n)
-    {
-        binaryResult[n] = ((nibbles[2 * n] << 4) + (nibbles[2 * n + 1]));
-    }
-
-    binaryResult.insert(binaryResult.begin(), raw[0]);
-
-    return binaryResult;
+    static const Adpcm4Transitions transitions;
+    return transitions;
 }
 
+// Back pointer: (previousState << 4) | nibble
+inline int backPointerState(uint16_t backPointer) { return backPointer >> 4; }
+inline uint8_t backPointerNibble(uint16_t backPointer) { return backPointer & 0xf; }
 
-/**
- * Encodes the given sequence of unsigned 8bit values to 4bit ADPCM.
- * The first 8bit value is stored "as is", but the following values are
- * compressed to 4bit values. This almost halves the size.
- * 
- * The encoder uses an ADPCM decoder and tries every possible input
- * until it gets the output that most closely matches the input value.
- * The parameter combinedNibbles controlls the number of nibbles
- * that are combined. Each additional nibble muliplies the runtime
- * by 16. A value between 3 and 4 produces good results.
- * Increasing the number further does not add much quality improvements,
- * but drastically increases the runtime, so 4 is the default.
- */
-std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw, uint64_t combinedNibbles)
+} // namespace
+
+
+std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw)
 {
-    uint64_t squaredSum = 0u;
-
-    CreativeAdpcmDecoder4Bit decoder(raw[0]);
-    
-    std::vector<uint64_t> result(raw.size() / combinedNibbles);
-
-    for (size_t i = 1; i < raw.size() / combinedNibbles; ++i)
+    if (raw.empty())
     {
-        Best bestResults;
+        throw std::runtime_error("Cannot encode empty sample data");
+    }
 
-        // try every possible input for the decoder
-        for (uint64_t n = 0; n < constPow(16, combinedNibbles); ++n)
-        {
-            CreativeAdpcmDecoder4Bit decoderCopy = decoder;
-            uint64_t diffSum = 0;
-            for (size_t nib = 0; nib < combinedNibbles; ++nib)
+    // The first sample is stored as reference byte, all following samples are encoded as nibbles.
+    // Two nibbles form one byte, so pad an odd number of samples by repeating the last sample.
+    std::vector<uint8_t> targets(raw.begin() + 1, raw.end());
+    if (targets.size() % 2 != 0)
+    {
+        targets.push_back(raw.back());
+    }
+
+    std::vector<uint8_t> nibbles;
+    nibbles.reserve(targets.size());
+
+    if (!targets.empty())
+    {
+        const auto& transitions = adpcm4Transitions();
+        constexpr uint64_t kInfinity = std::numeric_limits<uint64_t>::max();
+
+        /*
+         * Keeping back pointers for the whole input would need 2 KiB per sample. Instead a sliding
+         * window is used: whenever the window is full, the oldest kCommitLength decisions of the
+         * currently best path are written out. Survivor paths practically always merge within a few
+         * dozen samples, so this gives the same result as a full traceback. To keep the emitted
+         * nibbles a consistent path, all states that do not descend from the committed state are
+         * discarded afterwards.
+         */
+        constexpr size_t kCommitLength = 256;
+        constexpr size_t kWindowLength = 2 * kCommitLength;
+
+        std::vector<uint64_t> cost(kStateCount, kInfinity);
+        std::vector<uint64_t> nextCost(kStateCount);
+        std::vector<uint16_t> backPointers(kWindowLength * kStateCount);
+        std::array<uint64_t, 256> squaredError;
+        size_t windowFill = 0;  // number of steps stored in backPointers
+
+        cost[raw[0] * 4] = 0;  // decoder starts with the reference byte and accumulator 1
+
+        auto bestState = [&]() {
+            return static_cast<int>(std::min_element(cost.begin(), cost.end()) - cost.begin());
+        };
+
+        // Returns the nibbles of the path ending in `state`, covering all steps in the window.
+        auto traceBack = [&](int state) {
+            std::vector<uint8_t> path(windowFill);
+            for (size_t step = windowFill; step-- > 0;)
             {
-                int diff = decoderCopy.decodeNibble(getNthNibble(nib, n)) - raw[i*combinedNibbles + nib - combinedNibbles + 1];
-                diffSum += diff * diff;
+                uint16_t backPointer = backPointers[step * kStateCount + state];
+                path[step] = backPointerNibble(backPointer);
+                state = backPointerState(backPointer);
             }
- 
-            if (diffSum < bestResults.bestDiff)
+            return path;
+        };
+
+        auto commit = [&](size_t count) {
+            // follow best path back to the end of the committed part
+            int state = bestState();
+            std::vector<uint8_t> path = traceBack(state);
+            nibbles.insert(nibbles.end(), path.begin(), path.begin() + count);
+
+            int committedState = state;
+            for (size_t step = windowFill; step-- > count;)
             {
-                bestResults.bestDiff = diffSum;
-                bestResults.bestIndex = n;
-                bestResults.bestDecoder = decoderCopy;
+                committedState = backPointerState(backPointers[step * kStateCount + committedState]);
             }
-        }
 
-        decoder = bestResults.bestDecoder; 
-        result[i-1] = bestResults.bestIndex;
-        squaredSum += bestResults.bestDiff;
-
-
-        // if (i % 10 == 0) printf("%d\n", i);
-    }
-
-    // printf("sum: %ld\n", squaredSum);
-
-    std::vector<uint8_t> nibbles(result.size() * combinedNibbles);
-    for (size_t i = 0; i < result.size(); ++i)
-    {
-        for (size_t nib = 0; nib < combinedNibbles; ++nib)
-        {
-            nibbles[i * combinedNibbles + nib] = getNthNibble(nib, result[i]);
-        }
-    }
-
-    std::vector<uint8_t> binaryResult(nibbles.size() / 2);
-
-    // merge nibbles into bytes
-    for (size_t n = 0; n < nibbles.size() / 2; ++n)
-    {
-        binaryResult[n] = ((nibbles[2 * n] << 4) + (nibbles[2 * n + 1]));
-    }
-
-    binaryResult.insert(binaryResult.begin(), raw[0]);
-
-    return binaryResult;
-}
-
-
-struct TrellisBranch
-{
-    TrellisBranch(uint8_t firstValue) :
-        decoder(firstValue)
-    {
-    }
-
-    TrellisBranch(const CreativeAdpcmDecoder4Bit& dec, std::shared_ptr<TrellisBranch> p, uint8_t nib, uint64_t diff) :
-        decoder(dec), parent(p), nibble(nib), squaredDiff(diff)
-    {
-    }
-    
-    CreativeAdpcmDecoder4Bit decoder;
-    std::shared_ptr<TrellisBranch> parent;  // Points to parent branch instead of copying history
-    uint8_t nibble = 0;                      // Only this branch's nibble
-    uint64_t squaredDiff = 0;
-};
-
-// Reconstruct history by walking back through parent pointers
-std::vector<uint8_t> reconstructHistory(const std::shared_ptr<TrellisBranch>& branch) {
-    std::vector<uint8_t> history;
-    auto current = branch;
-    
-    // Walk back through parents, collecting nibbles
-    while (current->parent) {
-        history.push_back(current->nibble);
-        current = current->parent;
-    }
-    
-    // Reverse because we collected from end to beginning
-    std::reverse(history.begin(), history.end());
-    return history;
-}
-
-
-std::vector<uint8_t> createAdpcm4BitFromRawTrellis(const std::vector<uint8_t>& raw, uint32_t maxBranches)
-{
-    assert(!raw.empty());
-
-    int randomBranches = maxBranches / 2; // 50% random branches
-    
-    // Initialize random number generator
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    // Initialize trellis branches, we need maxBranches * 16 + maxBranches branches to cover all possibilities
-    std::vector<std::shared_ptr<TrellisBranch>> trellisBranches;
-    for (int i = 0; i < maxBranches * 16 + maxBranches; ++i)
-    {
-        auto branch = std::make_shared<TrellisBranch>(raw.front());
-        trellisBranches.push_back(branch);
-    }
-
-    for (int pos = 1; pos < raw.size(); ++pos)
-    {
-        // first sort branches by squaredDiff
-        std::sort(trellisBranches.begin(), trellisBranches.begin() + maxBranches * 16,
-            [](const std::shared_ptr<TrellisBranch>& a, const std::shared_ptr<TrellisBranch>& b)
+            // discard states that do not descend from the committed state
+            for (int s = 0; s < kStateCount; ++s)
             {
-                return a->squaredDiff < b->squaredDiff;
-            });
-        
-        // Select random branches from the sorted list (excluding the best ones we'll keep anyway)
-        // We sample from branches beyond the top (maxBranches - randomBranches) to add diversity
-        int numBestBranches = maxBranches - randomBranches;
-        if (maxBranches * 16 > numBestBranches + randomBranches)
-        {
-            // Create a distribution for selecting random branches from the remaining pool
-            std::uniform_int_distribution<> distrib(numBestBranches, maxBranches * 16 - 1);
-            
-            // Collect random indices
-            std::vector<int> randomIndices;
-            for (int i = 0; i < randomBranches; ++i)
-            {
-                randomIndices.push_back(distrib(gen));
-            }
-            
-            // Sort random indices to avoid duplicates and maintain order
-            std::sort(randomIndices.begin(), randomIndices.end());
-            randomIndices.erase(std::unique(randomIndices.begin(), randomIndices.end()), randomIndices.end());
-            
-            // Move random branches to fill the slots after the best branches
-            int targetSlot = numBestBranches;
-            for (int srcIdx : randomIndices)
-            {
-                if (targetSlot < maxBranches)
+                if (cost[s] == kInfinity) continue;
+                int ancestor = s;
+                for (size_t step = windowFill; step-- > count;)
                 {
-                    std::swap(trellisBranches[targetSlot], trellisBranches[srcIdx]);
-                    ++targetSlot;
+                    ancestor = backPointerState(backPointers[step * kStateCount + ancestor]);
+                }
+                if (ancestor != committedState)
+                {
+                    cost[s] = kInfinity;
                 }
             }
-        }
-        
-        // std::cout << "Best diff: " << trellisBranches.front()->squaredDiff << "\n";
 
-        #pragma omp parallel for
-        for (int branchNo = 0; branchNo < maxBranches; ++branchNo)
+            // drop committed steps from window
+            std::memmove(
+                backPointers.data(),
+                backPointers.data() + count * kStateCount,
+                (windowFill - count) * kStateCount * sizeof(uint16_t));
+            windowFill -= count;
+        };
+
+        for (uint8_t target : targets)
         {
-            for (uint8_t nibble = 0; nibble < 16; ++nibble)
+            for (int value = 0; value < 256; ++value)
             {
-                auto& currentBranch = trellisBranches[branchNo];
-                auto decoderCopy = currentBranch->decoder;
-                uint8_t decodedValue = decoderCopy.decodeNibble(nibble);
-                int32_t diff = (int32_t)decodedValue - (int32_t)raw[pos];
-                uint64_t newSquaredDiff = currentBranch->squaredDiff + diff * diff;
-                auto& newBranch = trellisBranches[ maxBranches + branchNo * 16 + nibble ];
-                
-                // Create new branch using the constructor that links to parent
-                newBranch = std::make_shared<TrellisBranch>(decoderCopy, currentBranch, nibble, newSquaredDiff);
+                int64_t diff = value - static_cast<int>(target);
+                squaredError[value] = static_cast<uint64_t>(diff * diff);
+            }
+
+            std::fill(nextCost.begin(), nextCost.end(), kInfinity);
+            uint16_t* stepBackPointers = &backPointers[windowFill * kStateCount];
+
+            for (int state = 0; state < kStateCount; ++state)
+            {
+                const uint64_t stateCost = cost[state];
+                if (stateCost == kInfinity) continue;
+
+                const int base = state * kNibbleCount;
+                for (int nibble = 0; nibble < kNibbleCount; ++nibble)
+                {
+                    const int next = transitions.nextState[base + nibble];
+                    const uint64_t newCost = stateCost + squaredError[transitions.value[base + nibble]];
+                    if (newCost < nextCost[next])
+                    {
+                        nextCost[next] = newCost;
+                        stepBackPointers[next] = static_cast<uint16_t>((state << 4) | nibble);
+                    }
+                }
+            }
+
+            cost.swap(nextCost);
+            ++windowFill;
+
+            if (windowFill == kWindowLength)
+            {
+                commit(kCommitLength);
             }
         }
 
-        // move the first maxBranches branches to the back, so they will be ignored in next sorting
-        std::rotate(trellisBranches.begin(), trellisBranches.begin() + maxBranches, trellisBranches.begin() + maxBranches * 17);
+        commit(windowFill);
     }
 
-    // find best branch
-    std::shared_ptr<TrellisBranch> bestBranch = trellisBranches.front();
-    for (int i = 0; i < maxBranches * 16; ++i)
+    std::vector<uint8_t> binaryResult;
+    binaryResult.reserve(nibbles.size() / 2 + 1);
+    binaryResult.push_back(raw[0]);
+    for (size_t n = 0; n + 1 < nibbles.size(); n += 2)
     {
-        if (trellisBranches[i]->squaredDiff < bestBranch->squaredDiff)
-        {
-            bestBranch = trellisBranches[i];
-        }
+        binaryResult.push_back(static_cast<uint8_t>((nibbles[n] << 4) | nibbles[n + 1]));
     }
-
-    // Reconstruct history by walking back through parent chain
-    std::vector<uint8_t> nibbles = reconstructHistory(bestBranch);
-    std::vector<uint8_t> binaryResult(nibbles.size() / 2);
-
-    // merge nibbles into bytes
-    for (size_t n = 0; n < nibbles.size() / 2; ++n)
-    {
-        binaryResult[n] = ((nibbles[2 * n] << 4) + (nibbles[2 * n + 1]));
-    }
-
-    binaryResult.insert(binaryResult.begin(), raw[0]);
 
     return binaryResult;
 }
-
-
 
 
 struct Best2bit

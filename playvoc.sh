@@ -13,4 +13,4 @@ tmpfile=$(mktemp /tmp/playvoc.XXXXXX)
 trap "rm -f $tmpfile" EXIT
 
 build/voctool -i $1 -o $tmpfile
-mplayer $tmpfile
+mplayer $tmpfile -ao pulse
