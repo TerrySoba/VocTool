@@ -1,7 +1,9 @@
 #include "encode_creative_adpcm.h"
+#include "noise_shaping.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
@@ -128,12 +130,31 @@ const TransitionTable<Codec>& transitionTable()
     return table;
 }
 
+/** Converts an 8-bit unsigned decoder value to the signed 16-bit scale used by the encoder. */
+inline int32_t toSigned16(int value)
+{
+    return (value - 128) * 256;
+}
+
 /**
- * Viterbi encoder. The first sample is stored as reference byte, every following sample
- * becomes one symbol. Symbols are packed into bytes, first symbol in the most significant bits.
+ * Viterbi encoder. The reference byte is stored as is, every target sample becomes one symbol.
+ * Symbols are packed into bytes, first symbol in the most significant bits.
+ *
+ * @param reference      First sample, stored verbatim. Initial state of the decoder.
+ * @param targets        Following samples in signed 16-bit scale (see toSigned16()), so samples can
+ *                       have more precision than the 8-bit output.
+ * @param shapingWeights Noise shaping weight per target sample in units of 1/1024, or empty for no
+ *                       noise shaping. See noise_shaping.h.
+ *
+ * Without noise shaping the result is the encoding with minimum squared error.
+ *
+ * With noise shaping the target of each sample is modified by feeding back the error of the previous
+ * sample, exactly like ADPCM-XQ does. As the error depends on the path through the trellis, every
+ * state keeps the error of its survivor path ("per-survivor processing"). The squared difference to
+ * the shaped target is minimized, which is the same criterion ADPCM-XQ uses in its lookahead search.
  */
 template <typename Codec>
-std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
+std::vector<uint8_t> viterbiEncode(uint8_t reference, const std::vector<int32_t>& targets, const std::vector<int16_t>& shapingWeights)
 {
     constexpr int kStateCount = Codec::kStateCount;
     constexpr int kSymbolBits = Codec::kSymbolBits;
@@ -141,14 +162,14 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
     constexpr int kSymbolsPerByte = 8 / kSymbolBits;
     static_assert(kStateCount << kSymbolBits <= std::numeric_limits<uint16_t>::max() + 1, "back pointer does not fit into 16 bit");
 
-    if (raw.empty())
+    if (!shapingWeights.empty() && shapingWeights.size() != targets.size())
     {
-        throw std::runtime_error("Cannot encode empty sample data");
+        throw std::logic_error("Number of shaping weights does not match number of samples");
     }
 
     // Pad to full bytes, so no sample is lost. Padding samples do not contribute to the error,
     // so they cannot degrade the encoding of the real samples.
-    const size_t sampleCount = raw.size() - 1;
+    const size_t sampleCount = targets.size();
     const size_t paddedCount = (sampleCount + kSymbolsPerByte - 1) / kSymbolsPerByte * kSymbolsPerByte;
 
     std::vector<uint8_t> symbols;
@@ -176,11 +197,12 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
 
         std::vector<uint64_t> cost(kStateCount, kInfinity);
         std::vector<uint64_t> nextCost(kStateCount);
+        std::vector<int32_t> shapingError(kStateCount, 0);  // noise shaping error of each survivor path
+        std::vector<int32_t> nextShapingError(kStateCount, 0);
         std::vector<uint16_t> backPointers(kWindowLength * kStateCount);
-        std::array<uint64_t, 256> squaredError;
         size_t windowFill = 0;  // number of steps stored in backPointers
 
-        cost[Codec::initialState(raw[0])] = 0;
+        cost[Codec::initialState(reference)] = 0;
 
         auto ancestorOf = [&](int state, size_t step) {
             for (size_t s = windowFill; s-- > step;)
@@ -224,19 +246,9 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
 
         for (size_t position = 0; position < paddedCount; ++position)
         {
-            if (position < sampleCount)
-            {
-                const int target = raw[position + 1];
-                for (int value = 0; value < 256; ++value)
-                {
-                    int64_t diff = value - target;
-                    squaredError[value] = static_cast<uint64_t>(diff * diff);
-                }
-            }
-            else
-            {
-                squaredError.fill(0);
-            }
+            const bool isPadding = position >= sampleCount;
+            const int32_t sample = isPadding ? 0 : targets[position];
+            const int64_t weight = (isPadding || shapingWeights.empty()) ? 0 : shapingWeights[position];
 
             std::fill(nextCost.begin(), nextCost.end(), kInfinity);
             uint16_t* stepBackPointers = &backPointers[windowFill * kStateCount];
@@ -246,20 +258,47 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
                 const uint64_t stateCost = cost[state];
                 if (stateCost == kInfinity) continue;
 
+                // noise shaping, same as noise_shape() in ADPCM-XQ
+                int32_t target = sample;
+                int32_t errorBase = -sample;  // the decoded value gets added to this
+                if (weight != 0)
+                {
+                    const int32_t error = shapingError[state];
+                    int32_t feedback = static_cast<int32_t>(-((weight * error + 512) >> 10));
+                    if (weight < 0 && feedback != 0)
+                    {
+                        if (feedback == error)
+                        {
+                            feedback += (feedback < 0) ? 1 : -1;
+                        }
+                        target = sample + feedback;
+                        errorBase = -sample;
+                    }
+                    else
+                    {
+                        target = sample + feedback;
+                        errorBase = -target;
+                    }
+                }
+
                 const int base = state * kSymbolCount;
                 for (int symbol = 0; symbol < kSymbolCount; ++symbol)
                 {
                     const int next = transitions.nextState[base + symbol];
-                    const uint64_t newCost = stateCost + squaredError[transitions.value[base + symbol]];
+                    const int32_t decoded = toSigned16(transitions.value[base + symbol]);
+                    const int64_t difference = isPadding ? 0 : static_cast<int64_t>(decoded) - target;
+                    const uint64_t newCost = stateCost + static_cast<uint64_t>(difference * difference);
                     if (newCost < nextCost[next])
                     {
                         nextCost[next] = newCost;
+                        nextShapingError[next] = errorBase + decoded;
                         stepBackPointers[next] = static_cast<uint16_t>((state << kSymbolBits) | symbol);
                     }
                 }
             }
 
             cost.swap(nextCost);
+            shapingError.swap(nextShapingError);
             ++windowFill;
 
             if (windowFill == kWindowLength)
@@ -273,7 +312,7 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
 
     std::vector<uint8_t> binaryResult;
     binaryResult.reserve(symbols.size() / kSymbolsPerByte + 1);
-    binaryResult.push_back(raw[0]);
+    binaryResult.push_back(reference);
     for (size_t n = 0; n < symbols.size(); n += kSymbolsPerByte)
     {
         uint8_t byte = 0;
@@ -287,15 +326,65 @@ std::vector<uint8_t> viterbiEncode(const std::vector<uint8_t>& raw)
     return binaryResult;
 }
 
+template <typename Codec>
+std::vector<uint8_t> encodeRaw(const std::vector<uint8_t>& raw)
+{
+    if (raw.empty())
+    {
+        throw std::runtime_error("Cannot encode empty sample data");
+    }
+
+    std::vector<int32_t> targets;
+    targets.reserve(raw.size() - 1);
+    for (size_t i = 1; i < raw.size(); ++i)
+    {
+        targets.push_back(toSigned16(raw[i]));
+    }
+    return viterbiEncode<Codec>(raw[0], targets, {});
+}
+
+template <typename Codec>
+std::vector<uint8_t> encodeSamples(const std::vector<double>& samples, const NoiseShaping& shaping)
+{
+    if (samples.empty())
+    {
+        throw std::runtime_error("Cannot encode empty sample data");
+    }
+
+    // same mapping as toUint8Vector(): -1.0 .. 1.0 => 0 .. 255
+    auto toUnsigned8 = [](double sample) { return std::clamp(sample * 128.0 + 128.0, 0.0, 255.0); };
+
+    const uint8_t reference = static_cast<uint8_t>(std::lround(toUnsigned8(samples.front())));
+
+    std::vector<int32_t> targets;
+    targets.reserve(samples.size() - 1);
+    for (size_t i = 1; i < samples.size(); ++i)
+    {
+        targets.push_back(static_cast<int32_t>(std::lround((toUnsigned8(samples[i]) - 128.0) * 256.0)));
+    }
+
+    return viterbiEncode<Codec>(reference, targets, computeShapingWeights(targets, shaping));
+}
+
 } // namespace
 
 
 std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw)
 {
-    return viterbiEncode<Adpcm4Codec>(raw);
+    return encodeRaw<Adpcm4Codec>(raw);
 }
 
 std::vector<uint8_t> createAdpcm2BitFromRaw(const std::vector<uint8_t>& raw)
 {
-    return viterbiEncode<Adpcm2Codec>(raw);
+    return encodeRaw<Adpcm2Codec>(raw);
+}
+
+std::vector<uint8_t> createAdpcm4Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
+{
+    return encodeSamples<Adpcm4Codec>(samples, shaping);
+}
+
+std::vector<uint8_t> createAdpcm2Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
+{
+    return encodeSamples<Adpcm2Codec>(samples, shaping);
 }

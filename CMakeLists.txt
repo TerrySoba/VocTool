@@ -25,6 +25,7 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/write_wave.cpp
     src/resampling.cpp
     src/encode_creative_adpcm.cpp
+    src/noise_shaping.cpp
     src/detect_file_format.cpp
     src/compare_audio.cpp
 )
@@ -45,6 +46,7 @@ add_executable(${PROJECT_NAME}_test
     src/test/detect_file_format_test.cpp
     src/test/voc_format_test.cpp
     src/test/encode_creative_adpcm_test.cpp
+    src/test/noise_shaping_test.cpp
     )
 
 target_include_directories(${PROJECT_NAME}_test PRIVATE 

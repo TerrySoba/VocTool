@@ -10,7 +10,7 @@ The resulting VOC file is always in mono.
 [source]
 .Usage of voctool
 ----
-Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -r RESAMPLER ] 
+Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -s SHAPING ] [ -r RESAMPLER ] 
 
 Program to convert WAVE files into VOC files including optional ADPCM compression.
 Conversion from VOC to WAVE is also supported.
@@ -29,6 +29,7 @@ options:
   -f, --frequency    Frequency of output file in hertz
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9
+  -s, --shaping      Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies. ( default: off )
   -r, --resampler    Resampler quality (libsamplerate). Options: best, medium, fast, linear ( default: best )
 ----
 
@@ -53,6 +54,27 @@ plus a step size, which has 4 possible values for ADPCM4 and 6 for ADPCM2.
 This gives only 1024 (ADPCM4) or 1536 (ADPCM2) possible decoder states.
 The encoder uses the Viterbi algorithm over these states to find the sequence of codes whose decoded output
 has the smallest possible squared error compared to the input.
+
+== Noise shaping
+
+Optionally the quantization noise of the ADPCM encoders can be shaped with `-s` / `--shaping`,
+using the same noise shaping as https://github.com/dbry/adpcm-xq[ADPCM-XQ] by David Bryant.
+The error of the previous sample is fed back into the next target sample, which moves the noise
+spectrum up or down in frequency. This increases the total noise, but can make it less audible.
+
+* `off` (default): flat noise, the encoding with the smallest possible error.
+* `static` or a positive weight up to `1.0`: moves the noise to high frequencies (`1.0` is first-order high-pass shaping).
+* a negative weight (greater than `-1.0`): moves the noise to low frequencies.
+* `dynamic`: chooses the weight continuously from the spectrum of the audio (comparing the levels above and below 1/6 of
+  the sample rate), so the noise is moved to where it is best masked by the signal.
+
+The encoder works on the full precision input samples, so with noise shaping the rounding to 8 bit is shaped as well.
+
+[source,shell]
+.Encoding with dynamic noise shaping
+----
+voctool -i sound.wav -f 11025 -c ADPCM4 -s dynamic -o sound.voc
+----
 
 == About Creative ADPCM
 

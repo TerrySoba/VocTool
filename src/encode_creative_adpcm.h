@@ -1,6 +1,8 @@
 #ifndef ENCODE_CREATIVE_ADPCM_H
 #define ENCODE_CREATIVE_ADPCM_H
 
+#include "noise_shaping.h"
+
 #include <vector>
 #include <cstdint>
 
@@ -21,5 +23,19 @@ std::vector<uint8_t> createAdpcm4BitFromRaw(const std::vector<uint8_t>& raw);
  * with the minimum squared error between input and decoded output.
  */
 std::vector<uint8_t> createAdpcm2BitFromRaw(const std::vector<uint8_t>& raw);
+
+/**
+ * Encodes samples in range -1.0 .. 1.0 to Creative 4-bit ADPCM, with optional noise shaping.
+ *
+ * The samples are used with full precision (not rounded to 8 bit first), so the error
+ * of the 8-bit output is minimized (and shaped) with respect to the original signal.
+ */
+std::vector<uint8_t> createAdpcm4Bit(const std::vector<double>& samples, const NoiseShaping& shaping = {});
+
+/**
+ * Encodes samples in range -1.0 .. 1.0 to Creative 2-bit ADPCM, with optional noise shaping.
+ * See createAdpcm4Bit().
+ */
+std::vector<uint8_t> createAdpcm2Bit(const std::vector<double>& samples, const NoiseShaping& shaping = {});
 
 #endif

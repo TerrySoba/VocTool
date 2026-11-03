@@ -53,6 +53,7 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         return 1;
     }
 
+    const NoiseShaping noiseShaping = noiseShapingFromString(parser.getValue<std::string>("shaping"));
     auto targetSampleRate = parser.getValueOptional<int32_t>("frequency");
     auto filename = parser.getValue<std::string>("input");
     auto waveFile = loadWaveFileToMono(filename.c_str());
@@ -86,7 +87,7 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
     case VOC_FORMAT_ADPCM_4BIT:
     {
         printf("Output format: ADPCM 4-bit\n");
-        encodedSampleData = createAdpcm4BitFromRaw(raw);
+        encodedSampleData = createAdpcm4Bit(waveFile.data, noiseShaping);
         auto decodedSampleData = decodeAdpcm4(
             encodedSampleData.front(),
             std::span<uint8_t>(encodedSampleData).subspan(1));
@@ -96,7 +97,7 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
     case VOC_FORMAT_ADPCM_2BIT:
     {
         printf("Output format: ADPCM 2-bit\n");
-        encodedSampleData = createAdpcm2BitFromRaw(raw);
+        encodedSampleData = createAdpcm2Bit(waveFile.data, noiseShaping);
         auto decodedSampleData = decodeAdpcm2(
             encodedSampleData.front(),
             std::vector<uint8_t>(encodedSampleData.begin() + 1, encodedSampleData.end()));
@@ -162,6 +163,7 @@ int main(int argc, char* argv[])
         parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no);
         parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
         parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
+        parser.addParameter("shaping", "s", "Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies.", clp::ParameterRequired::no, "off");
         parser.addParameter("resampler", "r", "Resampler quality (libsamplerate). Options: best, medium, fast, linear", clp::ParameterRequired::no, "best");
         parser.parse(argc, argv);
 
