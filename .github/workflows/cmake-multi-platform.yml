@@ -72,7 +72,7 @@ jobs:
       run: |
         git clone --depth 1 --branch 0.2.2 https://github.com/libsndfile/libsamplerate.git
         cd libsamplerate
-        cmake -B build -S . -DBUILD_TESTING=OFF -DLIBSAMPLERATE_EXAMPLES=OFF -DLIBSAMPLERATE_INSTALL=ON
+        cmake -B build -S . -DBUILD_TESTING=OFF -DLIBSAMPLERATE_EXAMPLES=OFF -DLIBSAMPLERATE_INSTALL=ON -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         cmake --build build/ --config Release
         cmake --install build/ --config Release --prefix "${{ github.workspace }}/deps"
 
