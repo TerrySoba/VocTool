@@ -10,7 +10,7 @@ The resulting VOC file is always in mono.
 [source]
 .Usage of voctool
 ----
-Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -l LEVEL ] [ -r RESAMPLER ] 
+Usage: voctool -i INPUT -o OUTPUT [ -f FREQUENCY ] [ -c COMPRESSION ] [ -n NORMALIZE ] [ -r RESAMPLER ] 
 
 Program to convert WAVE files into VOC files including optional ADPCM compression.
 Conversion from VOC to WAVE is also supported.
@@ -29,7 +29,6 @@ options:
   -f, --frequency    Frequency of output file in hertz
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9
-  -l, --level        Level of ADPCM2 compression. Must be integer. 1 = lowest quality but fast. Each step multiplies the runtime by 4. Not used for ADPCM4, which is always encoded optimally. ( default: 4 )
   -r, --resampler    Resampler quality (libsamplerate). Options: best, medium, fast, linear ( default: best )
 ----
 
@@ -48,16 +47,12 @@ voctool -i sound.voc -o sound.wav
 
 == How the ADPCM encoders work
 
-*ADPCM4* is always encoded optimally, so there is no quality setting.
-The complete state of the 4-bit decoder is just the previous output value (0..255) and the step size (1, 2, 4 or 8),
-which gives only 1024 possible states. The encoder uses the Viterbi algorithm over these states to find the
-nibble sequence whose decoded output has the smallest possible squared error compared to the input.
-The `--level` option is ignored for ADPCM4.
-
-*ADPCM2* uses an exhaustive search over blocks of samples. The level defines the number of samples that are combined.
-If a level of 4 is chosen, the encoder tries every combination of 4 samples to find the best compression.
-Incrementing the level by 1 increases the runtime by a factor of 4. A *level of 7* seems to be a good compromise
-between quality and speed.
+Both ADPCM formats are always encoded optimally, so there is no quality setting.
+The complete state of the Creative ADPCM decoders is very small: the previous output value (0..255)
+plus a step size, which has 4 possible values for ADPCM4 and 6 for ADPCM2.
+This gives only 1024 (ADPCM4) or 1536 (ADPCM2) possible decoder states.
+The encoder uses the Viterbi algorithm over these states to find the sequence of codes whose decoded output
+has the smallest possible squared error compared to the input.
 
 == About Creative ADPCM
 

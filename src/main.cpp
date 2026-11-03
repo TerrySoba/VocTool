@@ -32,6 +32,14 @@ std::string vocSampleFormatToString(VocSampleFormat format)
 }
 
 
+void printEncodingDifference(std::vector<uint8_t>& raw, std::vector<uint8_t>& decoded, uint32_t sampleRate)
+{
+    auto difference = computeAudioDifference(raw, decoded, sampleRate);
+    printf("  Average difference after encoding and decoding: %.2f\n", difference.averageDifference);
+    printf("  Max difference after encoding and decoding: %.2f\n", difference.maxDifference);
+}
+
+
 int convertWaveToVoc(const clp::CommandLineParser& parser)
 {
     VocSampleFormat format;
@@ -82,17 +90,17 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         auto decodedSampleData = decodeAdpcm4(
             encodedSampleData.front(),
             std::span<uint8_t>(encodedSampleData).subspan(1));
-        
-        auto difference = computeAudioDifference(raw, decodedSampleData, waveFile.sampleRate);
-        printf("  Average difference after encoding and decoding: %.2f\n", difference.averageDifference);
-        printf("  Max difference after encoding and decoding: %.2f\n", difference.maxDifference);
-
+        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
         break;
     }
     case VOC_FORMAT_ADPCM_2BIT:
     {
         printf("Output format: ADPCM 2-bit\n");
-        encodedSampleData = createAdpcm2BitFromRaw(raw, parser.getValue<uint64_t>("level"));
+        encodedSampleData = createAdpcm2BitFromRaw(raw);
+        auto decodedSampleData = decodeAdpcm2(
+            encodedSampleData.front(),
+            std::vector<uint8_t>(encodedSampleData.begin() + 1, encodedSampleData.end()));
+        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
         break;
     }
     case VOC_FORMAT_PCM_8BIT:
@@ -154,7 +162,6 @@ int main(int argc, char* argv[])
         parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no);
         parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
         parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
-        parser.addParameter("level", "l", "Level of ADPCM2 compression. Must be integer. 1 = lowest quality but fast. Each step multiplies the runtime by 4. Not used for ADPCM4, which is always encoded optimally.", clp::ParameterRequired::no, "4");
         parser.addParameter("resampler", "r", "Resampler quality (libsamplerate). Options: best, medium, fast, linear", clp::ParameterRequired::no, "best");
         parser.parse(argc, argv);
 
