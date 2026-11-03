@@ -8,6 +8,8 @@
 #include "detect_file_format.h"
 #include "write_wave.h"
 #include "compare_audio.h"
+#include "psychoacoustic.h"
+#include "shaping_search.h"
 
 #include <iostream>
 #include <map>
@@ -41,6 +43,41 @@ void printEncodingDifference(std::vector<uint8_t>& raw, std::vector<uint8_t>& de
 }
 
 
+struct SampleEncoding
+{
+    const char* description;
+    AdpcmEncodeFunction encode;
+    AdpcmDecodeFunction decode;
+};
+
+SampleEncoding sampleEncoding(VocSampleFormat format)
+{
+    auto withoutReference = [](const std::vector<uint8_t>& encoded) {
+        return std::vector<uint8_t>(encoded.begin() + 1, encoded.end());
+    };
+
+    switch (format)
+    {
+    case VOC_FORMAT_PCM_8BIT:
+        return {"PCM 8-bit", createPcm8Bit, [](const std::vector<uint8_t>& encoded) { return encoded; }};
+    case VOC_FORMAT_ADPCM_4BIT:
+        return {"ADPCM 4-bit", createAdpcm4Bit, [=](const std::vector<uint8_t>& encoded) {
+            auto data = withoutReference(encoded);
+            return decodeAdpcm4(encoded.front(), std::span<uint8_t>(data));
+        }};
+    case VOC_FORMAT_ADPCM_3BIT:
+        return {"ADPCM 2.6-bit", createAdpcm3Bit, [=](const std::vector<uint8_t>& encoded) {
+            return decodeAdpcm3(encoded.front(), withoutReference(encoded));
+        }};
+    case VOC_FORMAT_ADPCM_2BIT:
+        return {"ADPCM 2-bit", createAdpcm2Bit, [=](const std::vector<uint8_t>& encoded) {
+            return decodeAdpcm2(encoded.front(), withoutReference(encoded));
+        }};
+    }
+    throw std::logic_error("Unknown sample format");
+}
+
+
 int convertWaveToVoc(const clp::CommandLineParser& parser)
 {
     VocSampleFormat format;
@@ -54,7 +91,9 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
         return 1;
     }
 
-    const NoiseShaping noiseShaping = noiseShapingFromString(parser.getValue<std::string>("shaping"));
+    const std::string shapingText = parser.getValue<std::string>("shaping");
+    const bool automaticShaping = (shapingText == "auto");
+    const NoiseShaping noiseShaping = automaticShaping ? NoiseShaping{} : noiseShapingFromString(shapingText);
     auto targetSampleRate = parser.getValueOptional<int32_t>("frequency");
     auto filename = parser.getValue<std::string>("input");
     auto waveFile = loadWaveFileToMono(filename.c_str());
@@ -83,45 +122,34 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
 
     std::vector<uint8_t> encodedSampleData;
 
-    switch (format)
+    const SampleEncoding encoding = sampleEncoding(format);
+    printf("Output format: %s\n", encoding.description);
+
+    if (automaticShaping)
     {
-    case VOC_FORMAT_ADPCM_4BIT:
+        printf("  Trying noise shaping settings (perceptual noise, lower is better):\n");
+        auto candidates = evaluateShapings(
+            waveFile.data, waveFile.sampleRate, defaultShapingCandidates(), encoding.encode, encoding.decode);
+        const size_t best = bestShapingCandidate(candidates);
+        for (size_t i = 0; i < candidates.size(); ++i)
+        {
+            printf("    %-8s %7.2f dB%s\n",
+                toString(candidates[i].shaping).c_str(),
+                candidates[i].perceptualNoise,
+                (i == best) ? "  <- selected" : "");
+        }
+        encodedSampleData = std::move(candidates[best].encoded);
+    }
+    else
     {
-        printf("Output format: ADPCM 4-bit\n");
-        encodedSampleData = createAdpcm4Bit(waveFile.data, noiseShaping);
-        auto decodedSampleData = decodeAdpcm4(
-            encodedSampleData.front(),
-            std::span<uint8_t>(encodedSampleData).subspan(1));
-        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
-        break;
+        encodedSampleData = encoding.encode(waveFile.data, noiseShaping);
     }
-    case VOC_FORMAT_ADPCM_2BIT:
-    {
-        printf("Output format: ADPCM 2-bit\n");
-        encodedSampleData = createAdpcm2Bit(waveFile.data, noiseShaping);
-        auto decodedSampleData = decodeAdpcm2(
-            encodedSampleData.front(),
-            std::vector<uint8_t>(encodedSampleData.begin() + 1, encodedSampleData.end()));
-        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
-        break;
-    }
-    case VOC_FORMAT_PCM_8BIT:
-    {
-        printf("Output format: PCM 8-bit\n");
-        encodedSampleData = raw;
-        break;
-    }
-    case VOC_FORMAT_ADPCM_3BIT:
-    {
-        printf("Output format: ADPCM 2.6-bit\n");
-        encodedSampleData = createAdpcm3Bit(waveFile.data, noiseShaping);
-        auto decodedSampleData = decodeAdpcm3(
-            encodedSampleData.front(),
-            std::vector<uint8_t>(encodedSampleData.begin() + 1, encodedSampleData.end()));
-        printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
-        break;
-    }
-    }
+
+    auto decodedSampleData = encoding.decode(encodedSampleData);
+    printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
+    printf("  Perceptual noise (noise-to-mask ratio): %.2f dB\n",
+        perceptualNoise(waveFile.data, decodedSampleData, waveFile.sampleRate));
+
     std::vector<uint8_t> vocData = createVocFile(waveFile.sampleRate, encodedSampleData, format);
     storeFile(parser.getValue<std::string>("output"), vocData);
     return 0;
@@ -170,7 +198,7 @@ int main(int argc, char* argv[])
         parser.addParameter("frequency", "f", "Frequency of output file in hertz", clp::ParameterRequired::no);
         parser.addParameter("compression", "c", "Compression to be used. Options: PCM, ADPCM4, ADPCM3, ADPCM2", clp::ParameterRequired::no, "ADPCM4");
         parser.addParameter("normalize", "n", "Normalize audio to given fraction, e.g. 0.9", clp::ParameterRequired::no);
-        parser.addParameter("shaping", "s", "Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies.", clp::ParameterRequired::no, "off");
+        parser.addParameter("shaping", "s", "Noise shaping for PCM and ADPCM (as in ADPCM-XQ). Options: off, auto (tries several settings and keeps the best according to a psychoacoustic model), dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies.", clp::ParameterRequired::no, "off");
         parser.addParameter("resampler", "r", "Resampler quality (libsamplerate). Options: best, medium, fast, linear", clp::ParameterRequired::no, "best");
         parser.parse(argc, argv);
 

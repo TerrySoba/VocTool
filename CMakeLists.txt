@@ -28,10 +28,15 @@ add_library(${PROJECT_NAME}_lib STATIC
     src/noise_shaping.cpp
     src/detect_file_format.cpp
     src/compare_audio.cpp
+    src/psychoacoustic.cpp
+    src/shaping_search.cpp
 )
 
+find_package(Threads REQUIRED)
+
 target_link_libraries(${PROJECT_NAME}_lib
-    PRIVATE SampleRate::samplerate)
+    PRIVATE SampleRate::samplerate
+    PUBLIC Threads::Threads)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
@@ -47,6 +52,7 @@ add_executable(${PROJECT_NAME}_test
     src/test/voc_format_test.cpp
     src/test/encode_creative_adpcm_test.cpp
     src/test/noise_shaping_test.cpp
+    src/test/psychoacoustic_test.cpp
     )
 
 target_include_directories(${PROJECT_NAME}_test PRIVATE 

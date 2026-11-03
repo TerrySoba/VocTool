@@ -1,5 +1,6 @@
 #include "encode_creative_adpcm.h"
 #include "noise_shaping.h"
+#include "resampling.h"
 
 #include <algorithm>
 #include <array>
@@ -177,6 +178,44 @@ struct Adpcm3Codec
         }
 
         nextState = value * kScaleCount + newScale / 8;
+    }
+};
+
+/**
+ * Plain 8-bit PCM: the symbol is the output value. The decoder has no state, so there is only one
+ * state and the Viterbi search becomes the usual greedy error feedback quantizer: every sample is
+ * rounded to the value nearest to its (noise shaped) target. Without noise shaping this is plain
+ * rounding.
+ *
+ * Keeping the previous output value as state (256 states) would make it a trellis quantizer, but
+ * that is about 100 times slower and was not consistently better according to the psychoacoustic model.
+ */
+struct Pcm8Codec
+{
+    static constexpr int kStateCount = 1;
+    static constexpr int kSymbolBits = 8;
+    static constexpr int kSymbolsPerByte = 1;
+
+    static constexpr int storedBits(int /*positionInByte*/)
+    {
+        return 8;
+    }
+
+    static int initialState(uint8_t /*first*/)
+    {
+        return 0;
+    }
+
+    static int previousValue(int /*state*/)
+    {
+        // only used for padding, which PCM never needs (one sample per byte)
+        return 128;
+    }
+
+    static void step(int /*state*/, int symbol, int& nextState, int& value)
+    {
+        value = symbol;
+        nextState = 0;
     }
 };
 
@@ -488,4 +527,19 @@ std::vector<uint8_t> createAdpcm2Bit(const std::vector<double>& samples, const N
 std::vector<uint8_t> createAdpcm3Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
 {
     return encodeSamples<Adpcm3Codec>(samples, shaping);
+}
+
+std::vector<uint8_t> createPcm8Bit(const std::vector<double>& samples, const NoiseShaping& shaping)
+{
+    if (shaping.mode == NoiseShapingMode::off)
+    {
+        // The encoder targets have a precision of 1/256, which can round differently for values
+        // very close to x.5. Without noise shaping use exact rounding instead.
+        if (samples.empty())
+        {
+            throw std::runtime_error("Cannot encode empty sample data");
+        }
+        return toUint8Vector(samples);
+    }
+    return encodeSamples<Pcm8Codec>(samples, shaping);
 }

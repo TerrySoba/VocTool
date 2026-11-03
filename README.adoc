@@ -30,7 +30,7 @@ options:
   -f, --frequency    Frequency of output file in hertz
   -c, --compression  Compression to be used. Options: PCM, ADPCM4, ADPCM3, ADPCM2 ( default: ADPCM4 )
   -n, --normalize    Normalize audio to given fraction, e.g. 0.9
-  -s, --shaping      Noise shaping for ADPCM (as in ADPCM-XQ). Options: off, dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies. ( default: off )
+  -s, --shaping      Noise shaping for PCM and ADPCM (as in ADPCM-XQ). Options: off, auto (tries several settings and keeps the best according to a psychoacoustic model), dynamic (adapts to the audio), static (high-pass, same as 1.0) or a fixed weight w with -1 < w <= 1. Positive weights move noise to high frequencies, negative to low frequencies. ( default: off )
   -r, --resampler    Resampler quality (libsamplerate). Options: best, medium, fast, linear ( default: best )
 ----
 
@@ -58,16 +58,18 @@ has the smallest possible squared error compared to the input.
 
 == Noise shaping
 
-Optionally the quantization noise of the ADPCM encoders can be shaped with `-s` / `--shaping`,
+Optionally the quantization noise of the ADPCM encoders and of the rounding to 8-bit PCM can be shaped with `-s` / `--shaping`,
 using the same noise shaping as https://github.com/dbry/adpcm-xq[ADPCM-XQ] by David Bryant.
 The error of the previous sample is fed back into the next target sample, which moves the noise
 spectrum up or down in frequency. This increases the total noise, but can make it less audible.
 
-* `off` (default): flat noise, the encoding with the smallest possible error.
+* `off` (default): flat noise, the encoding with the smallest possible error (for PCM: plain rounding).
 * `static` or a positive weight up to `1.0`: moves the noise to high frequencies (`1.0` is first-order high-pass shaping).
 * a negative weight (greater than `-1.0`): moves the noise to low frequencies.
 * `dynamic`: chooses the weight continuously from the spectrum of the audio (comparing the levels above and below 1/6 of
   the sample rate), so the noise is moved to where it is best masked by the signal.
+* `auto`: encodes the audio with `off`, `dynamic` and the fixed weights -0.99, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75 and 1.0
+  (in parallel), and keeps the result whose noise is least audible according to a psychoacoustic model.
 
 The encoder works on the full precision input samples, so with noise shaping the rounding to 8 bit is shaped as well.
 
@@ -75,6 +77,26 @@ The encoder works on the full precision input samples, so with noise shaping the
 .Encoding with dynamic noise shaping
 ----
 voctool -i sound.wav -f 11025 -c ADPCM4 -s dynamic -o sound.voc
+----
+
+=== Psychoacoustic model
+
+The psychoacoustic model used by `auto` estimates how audible the coding noise is. It works like a simplified
+MPEG-1 psychoacoustic model: the audio is analysed in frames of about 23 ms, the spectrum is grouped into critical
+bands (1 Bark wide), and for every band a masking threshold is computed from the original signal using the
+Schroeder spreading function, a tonality dependent offset (tones mask less than noise) and the absolute threshold of
+hearing (assuming a full scale sine is played at 90 dB SPL). The coding noise is compared to this threshold, and the
+noise-to-mask ratio is averaged over all bands and frames ("Total NMR" as in PEAQ). Lower values are better, values
+below 0 dB mean the noise is mostly masked. The value is printed after every ADPCM encoding as
+"Perceptual noise".
+
+The best setting depends a lot on the sample rate: at 44.1 kHz high-frequency shaping usually wins, at 11 kHz
+high-frequency shaping moves the noise to 3-5 kHz where hearing is most sensitive, so low-frequency shaping is chosen.
+
+[source,shell]
+.Encoding with automatically selected noise shaping
+----
+voctool -i sound.wav -f 11025 -c ADPCM3 -s auto -o sound.voc
 ----
 
 == About Creative ADPCM

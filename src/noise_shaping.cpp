@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 
 namespace {
@@ -199,6 +200,25 @@ NoiseShaping noiseShapingFromString(const std::string& text)
         return {NoiseShapingMode::off};
     }
     return {NoiseShapingMode::fixed, weight};
+}
+
+
+std::string toString(const NoiseShaping& shaping)
+{
+    switch (shaping.mode)
+    {
+    case NoiseShapingMode::off:
+        return "off";
+    case NoiseShapingMode::dynamic:
+        return "dynamic";
+    case NoiseShapingMode::fixed:
+    {
+        char text[32];
+        std::snprintf(text, sizeof(text), "%.2f", shaping.weight);
+        return text;
+    }
+    }
+    return "unknown";
 }
 
 

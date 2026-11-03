@@ -35,6 +35,9 @@ struct NoiseShaping
  */
 NoiseShaping noiseShapingFromString(const std::string& text);
 
+/** Returns a short description, e.g. "off", "dynamic" or "0.50". */
+std::string toString(const NoiseShaping& shaping);
+
 /**
  * Returns one shaping weight per sample, in units of 1/1024 (1024 = weight 1.0).
  * Returns an empty vector if noise shaping is off.

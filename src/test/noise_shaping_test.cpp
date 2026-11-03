@@ -91,6 +91,14 @@ TEST_CASE("Noise shaping parameter parsing")
     REQUIRE_THROWS(noiseShapingFromString("foo"));
 }
 
+TEST_CASE("Noise shaping to string")
+{
+    REQUIRE(toString({NoiseShapingMode::off}) == "off");
+    REQUIRE(toString({NoiseShapingMode::dynamic}) == "dynamic");
+    REQUIRE(toString({NoiseShapingMode::fixed, -0.25}) == "-0.25");
+    REQUIRE(toString(noiseShapingFromString("static")) == "1.00");
+}
+
 TEST_CASE("Noise shaping weights")
 {
     std::vector<int32_t> samples(1000);
@@ -143,6 +151,25 @@ TEST_CASE("Encoding with full precision input")
     REQUIRE(createAdpcm4Bit(samples).front() == toUint8Vector(samples).front());
 }
 
+TEST_CASE("PCM without noise shaping is plain rounding")
+{
+    auto samples = sineMix({440, 1300, 3100}, 11025, 3001);
+    auto pcm = createPcm8Bit(samples);
+    REQUIRE(pcm.size() == samples.size());
+    REQUIRE(pcm == toUint8Vector(samples));
+
+    REQUIRE(createPcm8Bit({0.5}) == std::vector<uint8_t>{192});
+    REQUIRE_THROWS(createPcm8Bit({}));
+
+    // with noise shaping every sample is still one byte, and the error stays small
+    auto shaped = createPcm8Bit(samples, {NoiseShapingMode::dynamic});
+    REQUIRE(shaped.size() == samples.size());
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        REQUIRE(std::abs(shaped[i] - (samples[i] * 128.0 + 128.0)) < 4.0);
+    }
+}
+
 TEST_CASE("Noise shaping moves noise in frequency")
 {
     auto samples = sineMix({300, 700, 1100}, 11025, 6001);
@@ -182,7 +209,18 @@ TEST_CASE("Noise shaping moves noise in frequency")
         REQUIRE(energy(highPass) > energy(flat));
     }
 
-    SECTION("dynamic")
+    SECTION("PCM")
+    {
+        auto flat = noise(samples, createPcm8Bit(samples, {NoiseShapingMode::off}));
+        auto highPass = noise(samples, createPcm8Bit(samples, {NoiseShapingMode::fixed, 1.0}));
+        auto lowPass = noise(samples, createPcm8Bit(samples, {NoiseShapingMode::fixed, -0.5}));
+
+        REQUIRE(lowToHighRatio(highPass) < 0.7 * lowToHighRatio(flat));
+        REQUIRE(lowToHighRatio(lowPass) > 1.5 * lowToHighRatio(flat));
+        REQUIRE(energy(highPass) > energy(flat));
+    }
+
+        SECTION("dynamic")
     {
         auto encoded = createAdpcm4Bit(samples, {NoiseShapingMode::dynamic});
         REQUIRE(encoded.size() == 1 + (samples.size() - 1) / 2);

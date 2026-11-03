@@ -53,4 +53,11 @@ std::vector<uint8_t> createAdpcm2Bit(const std::vector<double>& samples, const N
  */
 std::vector<uint8_t> createAdpcm3Bit(const std::vector<double>& samples, const NoiseShaping& shaping = {});
 
+/**
+ * Converts samples in range -1.0 .. 1.0 to unsigned 8-bit PCM, with optional noise shaping of the
+ * rounding error. Without noise shaping this is the same as rounding to the nearest value.
+ * Uses the same Viterbi search as the ADPCM encoders (one output byte per sample).
+ */
+std::vector<uint8_t> createPcm8Bit(const std::vector<double>& samples, const NoiseShaping& shaping = {});
+
 #endif
