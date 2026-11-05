@@ -68,7 +68,7 @@ spectrum up or down in frequency. This increases the total noise, but can make i
 * a negative weight (greater than `-1.0`): moves the noise to low frequencies.
 * `dynamic`: chooses the weight continuously from the spectrum of the audio (comparing the levels above and below 1/6 of
   the sample rate), so the noise is moved to where it is best masked by the signal.
-* `auto`: encodes the audio with `off`, `dynamic` and the fixed weights -0.99, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75 and 1.0
+* `auto`: encodes the audio with `off`, `dynamic` and the fixed weights -0.99, -0.9, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75 and 1.0
   (in parallel), and keeps the result whose noise is least audible according to a psychoacoustic model.
 
 The encoder works on the full precision input samples, so with noise shaping the rounding to 8 bit is shaped as well.
@@ -89,6 +89,13 @@ hearing (assuming a full scale sine is played at 90 dB SPL). The coding noise is
 noise-to-mask ratio is averaged over all bands and frames ("Total NMR" as in PEAQ). Lower values are better, values
 below 0 dB mean the noise is mostly masked. The value is printed after every ADPCM encoding as
 "Perceptual noise".
+
+Noise below about 20 Hz is not audible and is therefore not part of the noise-to-mask ratio. It still matters:
+strong low-frequency shaping (weights close to -1) can make the decoded output slowly drift away from the original by
+dozens of levels. This costs headroom, so the output clips, and it can leave an offset at the end that thumps when
+playback stops. Therefore the low-frequency drift (the noise low-pass filtered below about 20 Hz, in 8-bit levels) is
+measured as well, and `auto` does not use settings that drift by more than 4 levels (unless all of them do, then the
+one with the least drift is used). The drift is printed after every encoding as "Low-frequency drift".
 
 The best setting depends a lot on the sample rate: at 44.1 kHz high-frequency shaping usually wins, at 11 kHz
 high-frequency shaping moves the noise to 3-5 kHz where hearing is most sensitive, so low-frequency shaping is chosen.

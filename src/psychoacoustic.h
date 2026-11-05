@@ -21,6 +21,12 @@
  * (NMR) of every band is computed. The result is the "Total NMR" known from PEAQ (ITU-R BS.1387):
  * the NMR averaged over all bands and frames, in dB. Values below 0 dB mean that the noise is
  * mostly masked, lower is better.
+ *
+ * Noise below about 20 Hz (DC and slow drift) is not counted in the NMR, as it is not audible. It is
+ * not harmless though: an encoding whose output drifts away from the original loses headroom, so it
+ * clips the signal, and it can end with an offset that thumps when playback stops. Strong
+ * low-frequency noise shaping (weights close to -1) can cause such a drift. lowFrequencyDrift()
+ * measures it separately, so it can be limited.
  */
 
 /** Assumed playback level of a full scale sine in dB SPL, used for the absolute threshold of hearing. */
@@ -50,11 +56,24 @@ public:
      */
     double noiseToMaskRatio(const std::vector<uint8_t>& decoded) const;
 
+    /**
+     * Returns the largest low-frequency drift of decoded compared to the reference, in 8-bit levels.
+     * The noise (decoded - reference) is low-pass filtered with two cascaded moving averages of
+     * 50 ms each, which keeps only content below about 20 Hz; the maximum absolute value is returned.
+     * A constant offset of n levels gives a drift of n.
+     *
+     * @param decoded See noiseToMaskRatio().
+     */
+    double lowFrequencyDrift(const std::vector<uint8_t>& decoded) const;
+
 private:
+    std::vector<double> noise(const std::vector<uint8_t>& decoded) const;
+
     std::vector<double> powerSpectrum(const std::vector<double>& signal, size_t start) const;
     std::vector<double> bandEnergies(const std::vector<double>& power) const;
 
     std::vector<double> m_reference;      // in 8-bit units, -128 .. 127
+    uint32_t m_sampleRate;
     size_t m_frameLength;
     std::vector<double> m_window;
     std::vector<int> m_bandOfBin;         // critical band of every FFT bin, -1 for ignored bins
@@ -62,7 +81,8 @@ private:
     std::vector<double> m_thresholds;     // masking threshold per frame and band
 };
 
-/** Convenience function, see PerceptualModel. */
+/** Convenience functions, see PerceptualModel. */
+double lowFrequencyDrift(const std::vector<double>& reference, const std::vector<uint8_t>& decoded, uint32_t sampleRate);
 double perceptualNoise(const std::vector<double>& reference, const std::vector<uint8_t>& decoded, uint32_t sampleRate);
 
 #endif

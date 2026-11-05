@@ -4,6 +4,9 @@
 #include "shaping_search.h"
 #include "encode_creative_adpcm.h"
 #include "decode_creative_adpcm.h"
+#include "read_wave.h"
+#include "resampling.h"
+#include "test_helper.h"
 
 #include <cmath>
 #include <random>
@@ -129,13 +132,77 @@ TEST_CASE("Automatic noise shaping selects the least audible candidate")
         REQUIRE(candidates[i].shaping.weight == shapings[i].weight);
         REQUIRE(candidates[i].encoded == createAdpcm2Bit(samples, shapings[i]));
         REQUIRE(candidates[i].perceptualNoise == perceptualNoise(samples, decode(candidates[i].encoded), kSampleRate));
+        REQUIRE(candidates[i].drift == lowFrequencyDrift(samples, decode(candidates[i].encoded), kSampleRate));
     }
 
     const size_t best = bestShapingCandidate(candidates);
+    REQUIRE(candidates[best].drift <= kMaxLowFrequencyDrift);
     for (const auto& candidate : candidates)
     {
-        REQUIRE(candidates[best].perceptualNoise <= candidate.perceptualNoise);
+        if (candidate.drift <= kMaxLowFrequencyDrift)
+        {
+            REQUIRE(candidates[best].perceptualNoise <= candidate.perceptualNoise);
+        }
     }
 
     REQUIRE_THROWS(bestShapingCandidate({}));
+}
+
+TEST_CASE("Low-frequency drift")
+{
+    auto signal = tone(1000, 0.5, 4000);
+
+    // identical signal and constant offset
+    REQUIRE(lowFrequencyDrift(signal.reference, withNoise(signal, std::vector<int>(4000, 0)), kSampleRate) == 0.0);
+    REQUIRE(std::abs(lowFrequencyDrift(signal.reference, withNoise(signal, std::vector<int>(4000, -3)), kSampleRate) - 3.0) < 1e-9);
+
+    // audible noise is not drift, even if it is loud
+    REQUIRE(lowFrequencyDrift(signal.reference, withNoise(signal, sineNoise(500, 20, 4000)), kSampleRate) < 0.5);
+    REQUIRE(lowFrequencyDrift(signal.reference, withNoise(signal, sineNoise(100, 20, 4000)), kSampleRate) < 2.0);
+
+    // a slow wander of the output is
+    std::vector<int> wander(4000);
+    for (size_t i = 0; i < wander.size(); ++i)
+    {
+        wander[i] = static_cast<int>(std::lround(20.0 * std::sin(2 * kPi * 2.0 * i / kSampleRate)));
+    }
+    REQUIRE(lowFrequencyDrift(signal.reference, withNoise(signal, wander), kSampleRate) > 15.0);
+}
+
+TEST_CASE("Automatic noise shaping does not select drifting candidates")
+{
+    auto candidate = [](double weight, double noise, double drift) {
+        return ShapingCandidate{{NoiseShapingMode::fixed, weight}, {}, noise, drift};
+    };
+
+    // the least audible candidate drifts too much
+    REQUIRE(bestShapingCandidate({candidate(0.5, 10.0, 0.0), candidate(-0.99, 5.0, 30.0), candidate(-0.5, 8.0, 4.0)}) == 2);
+    REQUIRE(bestShapingCandidate({candidate(-0.99, 5.0, 30.0), candidate(0.5, 10.0, 0.0)}) == 1);
+
+    // if all drift too much, the one with the least drift is used
+    REQUIRE(bestShapingCandidate({candidate(-0.99, 5.0, 30.0), candidate(-0.9, 6.0, 10.0), candidate(-0.95, 5.5, 20.0)}) == 1);
+}
+
+TEST_CASE("Automatic noise shaping keeps the drift low on real audio")
+{
+    // With this file, -0.99 has the lowest perceptual noise, but drifts by about 50 levels.
+    auto wave = loadWaveFileToMono(getTestDataDir() + "/jetpack.wav");
+    const uint32_t sampleRate = 22050;
+    const auto samples = resample(wave.data, wave.sampleRate, sampleRate);
+
+    auto decode = [](const std::vector<uint8_t>& encoded) {
+        return decodeAdpcm2(encoded.front(), std::vector<uint8_t>(encoded.begin() + 1, encoded.end()));
+    };
+
+    const auto candidates = evaluateShapings(samples, sampleRate, defaultShapingCandidates(), createAdpcm2Bit, decode);
+    const auto& best = candidates[bestShapingCandidate(candidates)];
+    REQUIRE(best.drift <= kMaxLowFrequencyDrift);
+    REQUIRE(best.shaping.mode == NoiseShapingMode::fixed);
+    REQUIRE(best.shaping.weight < 0.0);  // low-frequency shaping is still preferred
+
+    const auto strongest = std::find_if(candidates.begin(), candidates.end(), [](const ShapingCandidate& c) {
+        return c.shaping.mode == NoiseShapingMode::fixed && c.shaping.weight == -0.99;
+    });
+    REQUIRE(strongest != candidates.end());
+    REQUIRE(strongest->drift > 4 * kMaxLowFrequencyDrift);
 }

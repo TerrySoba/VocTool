@@ -7,7 +7,7 @@
 std::vector<NoiseShaping> defaultShapingCandidates()
 {
     std::vector<NoiseShaping> candidates = {{NoiseShapingMode::off}, {NoiseShapingMode::dynamic}};
-    for (double weight : {-0.99, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.0})
+    for (double weight : {-0.99, -0.9, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.0})
     {
         candidates.push_back({NoiseShapingMode::fixed, weight});
     }
@@ -29,8 +29,10 @@ std::vector<ShapingCandidate> evaluateShapings(
     for (const NoiseShaping& shaping : candidates)
     {
         futures.push_back(std::async(std::launch::async, [&, shaping]() {
-            ShapingCandidate candidate{shaping, encode(samples, shaping), 0.0};
-            candidate.perceptualNoise = model.noiseToMaskRatio(decode(candidate.encoded));
+            ShapingCandidate candidate{shaping, encode(samples, shaping), 0.0, 0.0};
+            const std::vector<uint8_t> decoded = decode(candidate.encoded);
+            candidate.perceptualNoise = model.noiseToMaskRatio(decoded);
+            candidate.drift = model.lowFrequencyDrift(decoded);
             return candidate;
         }));
     }
@@ -51,10 +53,17 @@ size_t bestShapingCandidate(const std::vector<ShapingCandidate>& candidates)
         throw std::logic_error("No noise shaping candidates");
     }
 
+    auto acceptable = [](const ShapingCandidate& candidate) { return candidate.drift <= kMaxLowFrequencyDrift; };
+
     size_t best = 0;
     for (size_t i = 1; i < candidates.size(); ++i)
     {
-        if (candidates[i].perceptualNoise < candidates[best].perceptualNoise)
+        const ShapingCandidate& candidate = candidates[i];
+        const ShapingCandidate& current = candidates[best];
+        const bool better = (acceptable(candidate) != acceptable(current))
+            ? acceptable(candidate)
+            : acceptable(candidate) ? (candidate.perceptualNoise < current.perceptualNoise) : (candidate.drift < current.drift);
+        if (better)
         {
             best = i;
         }

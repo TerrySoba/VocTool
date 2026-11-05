@@ -127,16 +127,17 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
 
     if (automaticShaping)
     {
-        printf("  Trying noise shaping settings (perceptual noise, lower is better):\n");
+        printf("  Trying noise shaping settings (perceptual noise, lower is better; low-frequency drift in levels):\n");
         auto candidates = evaluateShapings(
             waveFile.data, waveFile.sampleRate, defaultShapingCandidates(), encoding.encode, encoding.decode);
         const size_t best = bestShapingCandidate(candidates);
         for (size_t i = 0; i < candidates.size(); ++i)
         {
-            printf("    %-8s %7.2f dB%s\n",
+            printf("    %-8s %7.2f dB  drift %5.1f%s\n",
                 toString(candidates[i].shaping).c_str(),
                 candidates[i].perceptualNoise,
-                (i == best) ? "  <- selected" : "");
+                candidates[i].drift,
+                (i == best) ? "  <- selected" : (candidates[i].drift > kMaxLowFrequencyDrift) ? "  (drifts too much)" : "");
         }
         encodedSampleData = std::move(candidates[best].encoded);
     }
@@ -147,8 +148,9 @@ int convertWaveToVoc(const clp::CommandLineParser& parser)
 
     auto decodedSampleData = encoding.decode(encodedSampleData);
     printEncodingDifference(raw, decodedSampleData, waveFile.sampleRate);
-    printf("  Perceptual noise (noise-to-mask ratio): %.2f dB\n",
-        perceptualNoise(waveFile.data, decodedSampleData, waveFile.sampleRate));
+    const PerceptualModel model(waveFile.data, waveFile.sampleRate);
+    printf("  Perceptual noise (noise-to-mask ratio): %.2f dB\n", model.noiseToMaskRatio(decodedSampleData));
+    printf("  Low-frequency drift: %.1f levels\n", model.lowFrequencyDrift(decodedSampleData));
 
     std::vector<uint8_t> vocData = createVocFile(waveFile.sampleRate, encodedSampleData, format);
     storeFile(parser.getValue<std::string>("output"), vocData);

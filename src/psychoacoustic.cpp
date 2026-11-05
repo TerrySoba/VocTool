@@ -55,6 +55,29 @@ double thresholdInQuiet(double frequency)
     return 3.64 * std::pow(f, -0.8) - 6.5 * std::exp(-0.6 * std::pow(f - 3.3, 2.0)) + 1e-3 * std::pow(f, 4.0);
 }
 
+/**
+ * Centered moving average over length samples (length / 2 on each side). At the ends only the
+ * available samples are averaged.
+ */
+std::vector<double> movingAverage(const std::vector<double>& input, size_t length)
+{
+    const size_t half = length / 2;
+    std::vector<double> prefix(input.size() + 1, 0.0);
+    for (size_t i = 0; i < input.size(); ++i)
+    {
+        prefix[i + 1] = prefix[i] + input[i];
+    }
+
+    std::vector<double> output(input.size());
+    for (size_t i = 0; i < input.size(); ++i)
+    {
+        const size_t begin = (i > half) ? i - half : 0;
+        const size_t end = std::min(i + half + 1, input.size());
+        output[i] = (prefix[end] - prefix[begin]) / static_cast<double>(end - begin);
+    }
+    return output;
+}
+
 /** Schroeder spreading function as energy factor, dz = maskee - masker in Bark. */
 double spreading(double dz)
 {
@@ -66,6 +89,7 @@ double spreading(double dz)
 
 
 PerceptualModel::PerceptualModel(const std::vector<double>& reference, uint32_t sampleRate)
+    : m_sampleRate(sampleRate)
 {
     if (sampleRate == 0)
     {
@@ -89,7 +113,7 @@ PerceptualModel::PerceptualModel(const std::vector<double>& reference, uint32_t 
         m_window[i] = 0.5 - 0.5 * std::cos(2.0 * kPi * (i + 0.5) / m_frameLength);
     }
 
-    // Bin 0 (DC) is ignored, DC errors are not audible.
+    // Bin 0 (DC) is ignored, DC errors are not audible (see lowFrequencyDrift() for slow drift).
     const size_t binCount = m_frameLength / 2 + 1;
     m_bandOfBin.assign(binCount, -1);
     m_bandCount = 0;
@@ -189,7 +213,8 @@ std::vector<double> PerceptualModel::bandEnergies(const std::vector<double>& pow
     return energies;
 }
 
-double PerceptualModel::noiseToMaskRatio(const std::vector<uint8_t>& decoded) const
+/** Returns decoded - reference in 8-bit units, padding samples of decoded are ignored. */
+std::vector<double> PerceptualModel::noise(const std::vector<uint8_t>& decoded) const
 {
     if (decoded.size() < m_reference.size())
     {
@@ -201,6 +226,12 @@ double PerceptualModel::noiseToMaskRatio(const std::vector<uint8_t>& decoded) co
     {
         noise[i] = (static_cast<double>(decoded[i]) - 128.0) - m_reference[i];
     }
+    return noise;
+}
+
+double PerceptualModel::noiseToMaskRatio(const std::vector<uint8_t>& decoded) const
+{
+    const std::vector<double> noise = this->noise(decoded);
 
     const size_t hop = m_frameLength / 2;
     double sum = 0.0;
@@ -222,6 +253,26 @@ double PerceptualModel::noiseToMaskRatio(const std::vector<uint8_t>& decoded) co
         return kMinimumPerceptualNoiseDb;
     }
     return std::max(10.0 * std::log10(sum / frames), kMinimumPerceptualNoiseDb);
+}
+
+double PerceptualModel::lowFrequencyDrift(const std::vector<uint8_t>& decoded) const
+{
+    // A 50 ms moving average has its first zero at 20 Hz. Two of them in a row (a triangular window)
+    // suppress the side lobes, so audible low frequencies hardly contribute.
+    const size_t length = std::max<size_t>(1, m_sampleRate / 20);
+    const std::vector<double> drift = movingAverage(movingAverage(noise(decoded), length), length);
+
+    double maximum = 0.0;
+    for (double value : drift)
+    {
+        maximum = std::max(maximum, std::abs(value));
+    }
+    return maximum;
+}
+
+double lowFrequencyDrift(const std::vector<double>& reference, const std::vector<uint8_t>& decoded, uint32_t sampleRate)
+{
+    return PerceptualModel(reference, sampleRate).lowFrequencyDrift(decoded);
 }
 
 double perceptualNoise(const std::vector<double>& reference, const std::vector<uint8_t>& decoded, uint32_t sampleRate)
